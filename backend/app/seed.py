@@ -79,7 +79,7 @@ PROJECTS = [
             {"heading": "Try it live",
              "body": "The report builder above ran inside a confidential production system, so it can't be shown directly — so I rebuilt the idea in the open. This is a self-contained demo where you type a question in plain English about a small fictional business (a pizza shop) and watch it become SQL, run against a real database, and return live rows. It keeps the guardrails that actually mattered on the job: the model is given a described schema so it can't invent a field or table, every generated query is read-only, and when a request is ambiguous it asks a clarifying question instead of guessing. Different data, same engine — the natural-language-to-query layer, lifted out and made something you can type into yourself."},
         ],
-        demo_url="https://nl-to-sql-eight.vercel.app",
+        demo_url="https://demo.rakimfrancis.com",
         featured=True,
         sort_order=1,
     ),
