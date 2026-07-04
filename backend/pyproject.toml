@@ -1,0 +1,16 @@
+[project]
+name = "portfolio-backend"
+version = "0.1.0"
+description = "Portfolio site API — projects + contact"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlmodel>=0.0.21",
+    "pydantic[email]>=2.7",
+    "resend>=2.0",
+    "python-dotenv>=1.0",
+]
+
+[tool.uv]
+package = false
