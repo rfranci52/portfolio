@@ -1,3 +1,5 @@
+import projectsData from './projects.json'
+
 export interface ProjectSection {
   heading: string
   body: string
@@ -34,10 +36,18 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export const getProjects = () => fetch('/api/projects').then(json<Project[]>)
+// Projects are baked in at build time — instant loads, no backend needed.
+const PROJECTS = (projectsData as unknown as Project[])
+  .slice()
+  .sort((a, b) => a.sort_order - b.sort_order)
 
-export const getProject = (slug: string) =>
-  fetch(`/api/projects/${slug}`).then(json<Project>)
+export const getProjects = async (): Promise<Project[]> => PROJECTS
+
+export const getProject = async (slug: string): Promise<Project> => {
+  const project = PROJECTS.find((p) => p.slug === slug)
+  if (!project) throw new Error('Project not found')
+  return project
+}
 
 export const sendContact = (payload: ContactPayload) =>
   fetch('/api/contact', {
