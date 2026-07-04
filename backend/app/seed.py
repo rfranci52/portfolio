@@ -76,7 +76,10 @@ PROJECTS = [
              "body": "Nothing was documented, so I treated a real system export as ground truth: I ran my own field resolvers over the same accounts and measured a per-column match rate, building the map up incrementally until ~127 fields across a dozen tables matched exactly. The hardest part was money — balances weren't stored anywhere; they had to be derived by parsing a 350 MB transaction ledger, and I validated the derivation to the penny."},
             {"heading": "The natural-language layer",
              "body": "Non-technical users don't know column names, so they type plain English ('client', 'balance', 'last payment'). A language model maps the request onto the real schema — but bounded by a catalog of fields that actually exist, so it can never invent one — and a checklist UI shows the confident matches pre-checked and asks about anything unclear before running. It turned a specialist database task into something anyone could self-serve."},
+            {"heading": "Try it live",
+             "body": "The report builder above ran inside a confidential production system, so it can't be shown directly — so I rebuilt the idea in the open. This is a self-contained demo where you type a question in plain English about a small fictional business (a pizza shop) and watch it become SQL, run against a real database, and return live rows. It keeps the guardrails that actually mattered on the job: the model is given a described schema so it can't invent a field or table, every generated query is read-only, and when a request is ambiguous it asks a clarifying question instead of guessing. Different data, same engine — the natural-language-to-query layer, lifted out and made something you can type into yourself."},
         ],
+        demo_url=None,  # TODO: set to the stable live NL→SQL demo URL (mirror in projects.json)
         featured=True,
         sort_order=1,
     ),
