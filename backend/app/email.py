@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def send_contact_email(name: str, email: str, message: str) -> None:
     if not RESEND_API_KEY:
-        logger.warning("RESEND_API_KEY not set — email skipped (message saved to DB)")
+        logger.warning("RESEND_API_KEY not set; email skipped (message saved to DB)")
         return
 
     import resend

@@ -49,7 +49,7 @@ export default function ProjectDetail() {
             className="w-full rounded-lg border border-border"
           />
           <figcaption className="mt-2 font-mono text-xs text-muted">
-            Recorded end to end — the automation driving the app (left) with its live log (right).
+            Recorded end to end: the automation driving the app (left) with its live log (right).
           </figcaption>
         </figure>
       )}

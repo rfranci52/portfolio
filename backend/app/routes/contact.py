@@ -26,4 +26,4 @@ def submit_contact(
     session.add(ContactMessage(name=payload.name, email=payload.email, message=payload.message))
     session.commit()
     background.add_task(send_contact_email, payload.name, payload.email, payload.message)
-    return {"ok": True, "message": "Thanks — I'll get back to you."}
+    return {"ok": True, "message": "Thanks, I'll get back to you."}

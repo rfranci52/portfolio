@@ -38,8 +38,8 @@ class handler(BaseHTTPRequestHandler):
             return self._reply(400, {"ok": False, "message": "All fields are required."})
 
         if not RESEND_API_KEY:
-            # No key configured — accept gracefully rather than erroring the visitor.
-            return self._reply(200, {"ok": True, "message": "Thanks — I'll get back to you."})
+            # No key configured, accept gracefully rather than erroring the visitor.
+            return self._reply(200, {"ok": True, "message": "Thanks, I'll get back to you."})
 
         body = json.dumps({
             "from": RESEND_FROM,
@@ -62,6 +62,6 @@ class handler(BaseHTTPRequestHandler):
         except Exception:
             return self._reply(502, {
                 "ok": False,
-                "message": "Couldn't send right now — please email rakimfrancis@gmail.com directly.",
+                "message": "Couldn't send right now. Please email rakimfrancis@gmail.com directly.",
             })
-        return self._reply(200, {"ok": True, "message": "Thanks — I'll get back to you."})
+        return self._reply(200, {"ok": True, "message": "Thanks, I'll get back to you."})

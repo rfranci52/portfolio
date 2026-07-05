@@ -35,7 +35,7 @@ export default function Contact() {
     <div className="max-w-xl">
       <h1 className="text-3xl font-semibold tracking-tight text-fg">Contact</h1>
       <p className="mt-3 text-muted">
-        Have a role or a project in mind? Send a note — or email{' '}
+        Have a role or a project in mind? Send a note, or email{' '}
         <a href={`mailto:${SITE.email}`} className="text-accent hover:underline">{SITE.email}</a>.
       </p>
 

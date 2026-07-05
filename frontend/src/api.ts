@@ -36,7 +36,7 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
 }
 
-// Projects are baked in at build time — instant loads, no backend needed.
+// Projects are baked in at build time; instant loads, no backend needed.
 const PROJECTS = (projectsData as unknown as Project[])
   .slice()
   .sort((a, b) => a.sort_order - b.sort_order)

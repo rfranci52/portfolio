@@ -10,7 +10,7 @@ DATABASE_URL = f"sqlite:///{DATA_DIR / 'portfolio.db'}"
 # Load backend/.env if present (keeps secrets out of the shell / code).
 load_dotenv(BASE_DIR / ".env")
 
-# Email (Resend). Without these set, the contact form still works — it just
+# Email (Resend). Without these set, the contact form still works; it just
 # saves to the DB and skips sending. See README for setup.
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 CONTACT_TO_EMAIL = os.environ.get("CONTACT_TO_EMAIL", "rakimfrancis@gmail.com")

@@ -31,15 +31,15 @@ npm run dev
 The frontend proxies `/api` to the backend on port 8000, so start the backend first.
 
 > **Node version:** this needs Node 18+. If `node --version` shows an old version
-> (e.g. v14), run `export PATH="/opt/homebrew/bin:$PATH"` first — that's what
+> (e.g. v14), run `export PATH="/opt/homebrew/bin:$PATH"` first; that's what
 > `run.sh` does automatically.
 
 ## Structure
 
-- `frontend/` — React + TypeScript + Vite + Tailwind. Edit `src/config.ts` for
+- `frontend/`: React + TypeScript + Vite + Tailwind. Edit `src/config.ts` for
   all personal info (name, bio, links); projects and their case studies come
   from the API.
-- `backend/` — FastAPI + SQLModel + SQLite. Serves `/api/projects` and
+- `backend/`: FastAPI + SQLModel + SQLite. Serves `/api/projects` and
   `/api/contact`; seeds project content on first run (`app/seed.py`).
 
 ## Edit your content
