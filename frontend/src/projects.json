@@ -108,37 +108,41 @@
   },
   {
     "title": "Algorithmic Crypto Trading System",
-    "summary": "A personal end-to-end trading system. Live bots execute a tiered take-profit strategy through a broker API and reconcile their own records against the exchange's actual order history to catch drift. A separate backtester replays the strategy over five years and models trading fees and taxes for realistic returns, not vanity ones. An RNN module explores ML-based price prediction.",
+    "summary": "A personal end-to-end trading system. Live bots on the Coinbase API seed a small position, buy more as price falls below their average cost, and sell at a take-profit above it, with per-coin aggressiveness set by market-cap tier. They reconcile their own records against the exchange's real order history to catch drift, and an LLM (Claude) reviews each completed cycle and writes a daily briefing under a fixed monthly budget. A separate backtester replays years of hourly market data, modeling fees and taxes, to judge strategies on realistic returns rather than vanity ones.",
     "highlights": [
-      "Live bots run a tiered take-profit strategy via a broker API, logging every action to an audit trail",
+      "Live bots seed a position, buy dips relative to average cost (sized to the drop and scaled by account size), and sell at a take-profit, with per-coin aggressiveness set by market-cap tier",
       "Reconciliation tool checks the bot's records against the exchange's real order history, for ground-truth discipline",
-      "Backtesting engine replays five years of data and models taker fees and taxes (most hobby backtests ignore both)",
-      "RNN-based experimentation with ML price modeling"
+      "An LLM (Claude) reviews each completed trade cycle and writes a daily briefing on what's working, capped by a monthly cost budget",
+      "Backtester replays years of hourly data and models taker fees and taxes to compare strategy variants (most hobby backtests ignore both costs)"
     ],
     "video_url": null,
     "sort_order": 2,
     "id": 3,
-    "tagline": "A self-built quant stack: live tiered-exit bots, a fee- and tax-aware backtester, and ML price modeling.",
+    "tagline": "A self-built quant stack: live buy-the-dip bots on Coinbase, an LLM that reviews each trade cycle, and a fee- and tax-aware backtester.",
     "slug": "algorithmic-trading",
     "tech": [
       "Python",
       "Coinbase API",
-      "pandas",
-      "gspread",
-      "machine learning (RNN)"
+      "Claude API",
+      "Google Sheets",
+      "CoinGecko API"
     ],
     "sections": [
       {
         "heading": "End to end, and honest about it",
-        "body": "This is a system I built for myself, start to finish. Live bots place and manage orders through a broker API on a tiered take-profit strategy, logging every action. I'm deliberately leading with the engineering rather than any claim about returns: the interesting part isn't 'it makes money,' it's that it's built with the discipline of something that has to be trusted with real money."
+        "body": "This is a system I built for myself, start to finish. Live bots place and manage orders through the Coinbase API: they seed a small position, buy more as price falls below their average cost (sizing each buy to how far it dropped), and sell at a take-profit above average. I'm deliberately leading with the engineering rather than any claim about returns: the interesting part isn't 'it makes money,' it's that it's built with the discipline of something that has to be trusted with real money."
       },
       {
         "heading": "Records that check themselves",
         "body": "A trading bot's own logs can drift from what actually happened at the exchange. So a separate reconciliation tool pulls the exchange's real order history and compares it against the bot's records to surface any discrepancy. Trusting a system means being able to verify it against ground truth, the same instinct as validating a reverse-engineered database against a real export."
       },
       {
+        "heading": "An LLM that reviews its own trades",
+        "body": "After every completed buy-and-sell cycle, and once a day, the system hands its trade history to an LLM (Claude) and asks what worked, what stalled, and which rules to adjust, keeping a running memory of past observations. It all runs under a hard monthly cost budget, so a background analyst never turns into an expense. It is a small, honest example of putting an LLM to work inside a real system instead of bolting one on."
+      },
+      {
         "heading": "Realistic backtesting",
-        "body": "Most hobby backtests look great because they quietly ignore costs. This one replays five years of market data and models both taker fees and taxes, so the output is a realistic estimate rather than a vanity number. A separate track experiments with an RNN for price modeling, the ML side of the same problem."
+        "body": "Most hobby backtests look great because they quietly ignore costs. This one replays years of real hourly market data and models both taker fees and taxes, so the output is a realistic estimate rather than a vanity number. I use it to compare strategy variants head to head before changing anything the live bot actually does."
       }
     ],
     "repo_url": null,
