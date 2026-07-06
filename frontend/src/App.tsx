@@ -39,7 +39,7 @@ function Footer() {
           {SITE.github && (
             <a href={SITE.github} target="_blank" rel="noreferrer" className="hover:text-fg">github</a>
           )}
-          <a href={`mailto:${SITE.email}`} className="hover:text-fg">email</a>
+          <Link to="/contact" className="hover:text-fg">email</Link>
         </div>
       </div>
     </footer>

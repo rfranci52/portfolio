@@ -38,8 +38,10 @@ class handler(BaseHTTPRequestHandler):
             return self._reply(400, {"ok": False, "message": "All fields are required."})
 
         if not RESEND_API_KEY:
-            # No key configured, accept gracefully rather than erroring the visitor.
-            return self._reply(200, {"ok": True, "message": "Thanks, I'll get back to you."})
+            # No email provider configured yet: stay graceful, but give a real path so
+            # the message is never silently lost.
+            return self._reply(200, {"ok": True,
+                "message": "Thanks! I'll get back to you. If it's time-sensitive, email me directly at rakimfrancis@gmail.com."})
 
         body = json.dumps({
             "from": RESEND_FROM,
