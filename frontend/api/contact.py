@@ -51,7 +51,15 @@ def send_email(name, email, message):
     }).encode()
     req = urllib.request.Request(
         "https://api.resend.com/emails", data=body, method="POST",
-        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            # Resend's edge (Cloudflare) 403s the default Python-urllib signature
+            # with error 1010; a normal user-agent clears the browser-integrity check.
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
