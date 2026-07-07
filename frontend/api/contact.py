@@ -13,6 +13,7 @@ Env vars (portfolio Vercel project):
 """
 import json
 import os
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
@@ -38,9 +39,9 @@ def save_lead(name, email, message):
 
 
 def send_email(name, email, message):
-    """Best-effort notification via Resend. Never raises."""
+    """Best-effort notification via Resend. Never raises. Returns (ok, detail)."""
     if not RESEND_API_KEY:
-        return False
+        return False, "no_key"
     body = json.dumps({
         "from": RESEND_FROM,
         "to": [CONTACT_TO],
@@ -53,12 +54,16 @@ def send_email(name, email, message):
         headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
     )
     try:
-        urllib.request.urlopen(req, timeout=10)
-        return True
-    except Exception:
-        import traceback
-        traceback.print_exc()
-        return False
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return True, f"sent:{r.status}"
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            detail = ""
+        return False, f"http:{e.code}:{detail}"
+    except Exception as e:
+        return False, f"err:{type(e).__name__}:{e}"
 
 
 class handler(BaseHTTPRequestHandler):
@@ -92,10 +97,17 @@ class handler(BaseHTTPRequestHandler):
                 traceback.print_exc()
 
         # 2) Best-effort email notification on top.
-        send_email(name, email, message)
+        email_ok, email_detail = send_email(name, email, message)
 
         if saved:
-            return self._reply(200, {"ok": True, "message": "Thanks! I'll get back to you."})
-        # DB unavailable: stay graceful, but give a real path so nothing is lost.
-        return self._reply(200, {"ok": True,
-            "message": "Thanks! I'll get back to you. If it's time-sensitive, email me directly at rakimfrancis@gmail.com."})
+            payload = {"ok": True, "message": "Thanks! I'll get back to you."}
+        else:
+            # DB unavailable: stay graceful, but give a real path so nothing is lost.
+            payload = {"ok": True,
+                "message": "Thanks! I'll get back to you. If it's time-sensitive, email me directly at rakimfrancis@gmail.com."}
+        # Temporary diagnostic: only a caller sending "x-debug: 1" sees the email outcome;
+        # real visitors get the clean message above. Remove once Resend is confirmed working.
+        if self.headers.get("x-debug") == "1":
+            payload["saved"] = saved
+            payload["notify"] = email_detail
+        return self._reply(200, payload)
