@@ -104,18 +104,13 @@ class handler(BaseHTTPRequestHandler):
                 import traceback
                 traceback.print_exc()
 
-        # 2) Best-effort email notification on top.
+        # 2) Best-effort email notification on top; log server-side but never fail on it.
         email_ok, email_detail = send_email(name, email, message)
+        if not email_ok:
+            print("contact: email notify failed:", email_detail)
 
         if saved:
-            payload = {"ok": True, "message": "Thanks! I'll get back to you."}
-        else:
-            # DB unavailable: stay graceful, but give a real path so nothing is lost.
-            payload = {"ok": True,
-                "message": "Thanks! I'll get back to you. If it's time-sensitive, email me directly at rakimfrancis@gmail.com."}
-        # Temporary diagnostic: only a caller sending "x-debug: 1" sees the email outcome;
-        # real visitors get the clean message above. Remove once Resend is confirmed working.
-        if self.headers.get("x-debug") == "1":
-            payload["saved"] = saved
-            payload["notify"] = email_detail
-        return self._reply(200, payload)
+            return self._reply(200, {"ok": True, "message": "Thanks! I'll get back to you."})
+        # DB unavailable: stay graceful, but give a real path so nothing is lost.
+        return self._reply(200, {"ok": True,
+            "message": "Thanks! I'll get back to you. If it's time-sensitive, email me directly at rakimfrancis@gmail.com."})
