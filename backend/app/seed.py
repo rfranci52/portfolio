@@ -95,29 +95,43 @@ PROJECTS = [
     ),
     Project(
         slug="algorithmic-trading",
-        title="Algorithmic Crypto Trading System",
-        tagline="A self-built quant stack: live tiered-exit bots, a fee- and tax-aware backtester, and ML price modeling.",
+        title="Algorithmic Trading System",
+        tagline="A self-built quant stack: live bots on Coinbase and Alpaca, an event-sourced core that audits itself, and an LLM that reviews every trade cycle.",
         summary=(
-            "A personal end-to-end trading system. Live bots execute a tiered take-profit "
-            "strategy through a broker API and reconcile their own records against the "
-            "exchange's actual order history to catch drift. A separate backtester replays "
-            "the strategy over five years and models trading fees and taxes for realistic "
-            "returns, not vanity ones. An RNN module explores ML-based price prediction."
+            "A personal end-to-end trading system, rebuilt around a hard lesson: "
+            "spreadsheets make dishonest ledgers. Three live bots (two crypto mandates "
+            "on Coinbase, one equities on Alpaca) run real money. The crypto side now "
+            "sits on an event-sourced SQLite core: every trade, price tick, and system "
+            "event is an append-only fact, and positions and P&L are derived views, so "
+            "the books can be re-audited from raw history at any time. A crash-safe "
+            "execution engine rests maker limit orders on the exchange, reconciles "
+            "itself against real order history at every startup, and roughly halved "
+            "the exchange's take per cycle. An LLM (Claude) reviews each completed "
+            "cycle under a fixed monthly budget."
         ),
-        tech=["Python", "Coinbase API", "pandas", "gspread", "machine learning (RNN)"],
+        tech=["Python", "SQLite", "Coinbase API", "Alpaca API", "Claude API",
+              "CoinGecko API", "Google Sheets"],
         highlights=[
-            "Live bots run a tiered take-profit strategy via a broker API, logging every action to an audit trail",
-            "Reconciliation tool checks the bot's records against the exchange's real order history, for ground-truth discipline",
-            "Backtesting engine replays five years of data and models taker fees and taxes (most hobby backtests ignore both)",
-            "RNN-based experimentation with ML price modeling",
+            "Two buy-trigger families: laddered buys below average cost, sized to the depth of the dip, plus pullback-from-high entries that restart cycles after each exit, with per-coin aggressiveness set by market-cap tier and time-based re-arms so a position can never strand",
+            "Event-sourced core: trades, prices, and events are append-only facts; positions and P&L are derived views, so an accounting bug can be fixed retroactively and drift is caught by a standing audit query instead of luck",
+            "The audit layer paid for itself on day one: it flagged a recorded loss that had never actually happened (a legacy double-count) and the books were corrected from raw trade history",
+            "Execution engine rests maker limit orders on the exchange: exits keep working while the bot is offline, fills are booked atomically, startup reconciliation catches anything that filled in the gap, and the redesign cut the exchange's take from roughly 30% to 15% of gross per cycle",
+            "Strategy-as-spec: the rules live in adjudicated specification documents, and the rebuild shipped behind 35 automated tests against a simulated exchange, with zero real orders placed in testing",
+            "An LLM (Claude) reviews every completed cycle and writes a briefing at every startup, keeping a running memory of its own past analyses, under a hard monthly cost budget",
         ],
         sections=[
             {"heading": "End to end, and honest about it",
-             "body": "This is a system I built for myself, start to finish. Live bots place and manage orders through a broker API on a tiered take-profit strategy, logging every action. I'm deliberately leading with the engineering rather than any claim about returns: the interesting part isn't 'it makes money,' it's that it's built with the discipline of something that has to be trusted with real money."},
-            {"heading": "Records that check themselves",
-             "body": "A trading bot's own logs can drift from what actually happened at the exchange. So a separate reconciliation tool pulls the exchange's real order history and compares it against the bot's records to surface any discrepancy. Trusting a system means being able to verify it against ground truth, the same instinct as validating a reverse-engineered database against a real export."},
+             "body": "This is a system I built for myself, start to finish, and it trades real money. Three bots with two mandates: one crypto bot harvests cycles (buy below its average cost, exit the whole position at a fixed take-profit), a second accumulates long-term positions and never sells, and an equities bot runs the same family of ideas on Alpaca (still on the older architecture, next in line for the rebuild). I'm deliberately leading with the engineering rather than any claim about returns: the interesting part isn't 'it makes money,' it's that it's built with the discipline of something that has to be trusted with real money."},
+            {"heading": "An event-sourced core, because spreadsheets make dishonest ledgers",
+             "body": "The first version kept its state in spreadsheets, and the spreadsheets lied. A month of forensics on the raw trade history turned up a recorded loss that never happened (a double-counted cost basis from a long-dead bug), coins sold that were never logged as bought, and reset logic that silently didn't exist. The fix wasn't better spreadsheets, it was a different shape of storage: an SQLite core where trades, price ticks, and system events are append-only facts, and positions, cycle P&L, and ledgers are views derived from them. Stored rollups keep bugs forever; derived views recompute the truth, so fixing an accounting bug retroactively fixes history. A standing drift-detection query now compares recorded results against the raw journal, and it caught its first real discrepancy the day it was turned on."},
+            {"heading": "Execution built to be trusted",
+             "body": "The rebuilt execution layer rests maker limit orders on the exchange instead of chasing prices with instant fills. Exits sit on the book around the clock, so a take-profit executes even if the bot is down. Entries are proximity-armed: a buy order is only posted when price comes within a narrow band of its trigger, so capital isn't locked in orders far from the action. Fill accounting is atomic (a fill books its trade, state change, and order close together or not at all), and on every startup the engine reconciles against the exchange's real order history and books anything that filled while it was offline. The redesign also cut the exchange's take from roughly 30% to roughly 15% of gross per cycle, a cost claim, not a returns claim."},
+            {"heading": "The strategy is a document, not a habit",
+             "body": "I build heavily with AI assistance, and the failure mode of that workflow is drift: an assistant quietly 'corrects' your strategy toward the textbook version of itself. The fix was to make the strategy a contract. Its intent lives in specification documents written in plain language; every divergence between what the code did and what I actually wanted got an explicit ruling, recorded with its reasoning; and the rebuilt bots shipped behind 35 automated tests, run against a simulated exchange, that assert the specs, including one test whose whole job is to fail loudly if anyone ever re-introduces the most persistent unwanted 'correction.' The AI writes code; the spec, and the judgment behind it, is mine."},
+            {"heading": "An LLM that reviews its own trades",
+             "body": "After every completed buy-and-sell cycle, and at every startup, the system hands its trade history to an LLM (Claude) and asks what worked, what stalled, and which rules to adjust, keeping a running memory of past observations so analyses build on each other. It all runs under a hard monthly cost budget, so a background analyst never turns into an expense. It is a small, honest example of putting an LLM to work inside a real system instead of bolting one on."},
             {"heading": "Realistic backtesting",
-             "body": "Most hobby backtests look great because they quietly ignore costs. This one replays five years of market data and models both taker fees and taxes, so the output is a realistic estimate rather than a vanity number. A separate track experiments with an RNN for price modeling, the ML side of the same problem."},
+             "body": "Most hobby backtests look great because they quietly ignore costs. This one replays years of real market data and models both fees and taxes, so the output is a realistic estimate rather than a vanity number. The rebuilt system also records its own minute-level price history from live polling, building a first-party dataset so future backtests can replay against exactly what the live bots saw."},
         ],
         featured=True,
         sort_order=2,
