@@ -1,7 +1,7 @@
 [project]
 name = "portfolio-backend"
 version = "0.1.0"
-description = "Portfolio site API — projects + contact"
+description = "Portfolio site API: projects + contact"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

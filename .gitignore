@@ -9,3 +9,7 @@ dist/
 .env.*.local
 .DS_Store
 .claude/
+# Kept local: the bot's source text and its test answers are only reachable by asking the bot.
+content/
+eval/cases.jsonl
+eval/results/
