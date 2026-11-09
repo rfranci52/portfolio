@@ -12,7 +12,7 @@ const PIPELINE = [
   },
   {
     title: 'Retrieval',
-    body: 'Two searches run side by side over his written case studies: one by meaning, using vector embeddings, and one by exact words, using Postgres full-text search. Reciprocal rank fusion merges the two lists and the top eight passages move on. No model writes a database query at any point.',
+    body: 'Two searches run side by side over his written case studies: one by meaning, using vector embeddings, and one by exact words, using Postgres full-text search. A follow-up question runs that pair twice, once on its own and once with the previous exchange attached. Reciprocal rank fusion merges all of the lists and the top eight passages move on. No model writes a database query at any point.',
   },
   {
     title: 'Public lookups and organization context',

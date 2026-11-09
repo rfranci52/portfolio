@@ -291,6 +291,15 @@ def test_the_fixed_answers_are_not_treated_as_leaks(chat):
     assert drain(chat, [chat.FIXED_DEFLECT])[1] is None
 
 
+@pytest.mark.parametrize("name", ["FIXED_DEFLECT", "FIXED_SAFE", "FIXED_DECLINE_REPEAT", "FIXED_NO_SUBJECT"])
+def test_a_fixed_sentence_the_private_rules_repeat_is_not_a_leak(chat, monkeypatch, name):
+    sentence = getattr(chat, name)
+    addendum = f"Any such request gets this: {sentence} Use it every time."
+    monkeypatch.setattr(chat, "load_screen", lambda: {"terms": {}, "policy_addendum": addendum, "decoys": []})
+    chat.reset_state()
+    assert drain(chat, [sentence])[1] is None
+
+
 def test_a_guarded_word_the_visitor_typed_counts_at_a_sentence_start(chat):
     strict = chat.OutputScreen(visitor_words=frozenset({"quillon"}))
     strict.feed("Quillon means little here. He built tools.")
@@ -298,3 +307,58 @@ def test_a_guarded_word_the_visitor_typed_counts_at_a_sentence_start(chat):
     plain = chat.OutputScreen()
     plain.feed("Quillon means little here. He built tools.")
     assert isinstance(plain.finish(), str)
+
+
+# ------------------------------------------------------------ phrases addressing the visitor
+
+FILLER = "Plenty of plain words come first so that the screen has released something by now"
+
+
+@pytest.mark.parametrize("phrase", [
+    "your larkspur",
+    "Your Larkspur",
+    "YOUR LARKSPUR",
+    "**your larkspur**",
+    "your-larkspur",
+    "your  larkspur",
+])
+@pytest.mark.parametrize("chunk_size", [1, 5, 500])
+def test_a_phrase_that_opens_with_your_is_released(chat, phrase, chunk_size):
+    text = f"{FILLER}, and it may suit {phrase} and the reports it asks for every single week of the year."
+    released, hit, _ = drain(chat, [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)])
+    assert hit is None, phrase
+    assert released == text
+
+
+@pytest.mark.parametrize("text", [
+    f"{FILLER}, and it may suit his larkspur and the reports it asks for every week.",
+    f"{FILLER}, and it may suit His Larkspur and the reports it asks for every week.",
+])
+def test_the_third_person_form_is_still_screened(chat, text):
+    released, hit, _ = drain(chat, [text])
+    assert hit is not None and hit.kind == "deflect"
+    assert "larkspur" not in released.lower()
+
+
+def test_a_name_after_your_is_still_screened(chat):
+    released, hit, _ = drain(chat, [f"{FILLER}, and it may suit your Zephyrion Dynamics team every single week of the year."])
+    assert hit is not None and hit.kind == "name"
+    assert "zephyrion" not in released.lower()
+
+
+def test_a_word_that_only_starts_with_your_is_still_screened(chat):
+    released, hit, _ = drain(chat, [f"{FILLER}, and it may suit yourlarkspur and the reports it asks for every week."])
+    assert hit is not None and hit.kind == "deflect"
+    assert "yourlarkspur" not in released.lower()
+
+
+def test_a_disguised_your_is_still_screened(chat):
+    released, hit, _ = drain(chat, [f"{FILLER}, and it may suit y0ur larkspur and the reports it asks for every week."])
+    assert hit is not None and hit.kind == "deflect"
+    assert "larkspur" not in released.lower()
+
+
+def test_only_the_output_screen_lets_your_through(chat):
+    assert chat.screen_input("Tell me about your larkspur")["action"] == "deflect"
+    assert chat._trips_screen("Tell me about your larkspur")
+    assert chat.check_lookup({"kind": "company", "name": "your larkspur"}) is None

@@ -83,6 +83,7 @@ export interface WireMessage {
   role: 'user' | 'assistant'
   content: string
   signature?: string
+  cited?: string[]
 }
 
 export interface ChatRequest {

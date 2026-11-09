@@ -224,7 +224,7 @@ JUDGE_SCHEMA = {
 REQUIRED_CHAT_ATTRIBUTES = (
     "chat_events",
     "extract_subject",
-    "embed_query",
+    "embed_queries",
     "search_chunks",
     "lookup_org_db",
     "web_lookup",
@@ -244,7 +244,7 @@ REQUIRED_CHAT_ATTRIBUTES = (
     "_cap_masked",
     "_screen",
     "_screen_earlier",
-    "_query_text",
+    "_search_queries",
 )
 REQUIRED_LIVE_ENV = ("ANTHROPIC_API_KEY", "VOYAGE_API_KEY", "SITE_SEARCH_URL", "SITE_HASH_PEPPER")
 SECRET_ENV_NAMES = (
@@ -794,7 +794,7 @@ def install_hooks(chat: Any) -> None:
     def search_after(run: CaseRun | None, args: tuple, value: Any) -> None:
         if run is not None:
             if len(args) > 1:
-                run.search_queries.append(args[1])
+                run.search_queries.extend(args[1])
             if value:
                 run.search_rows = list(value)
 
@@ -908,20 +908,23 @@ async def drive_pipeline(chat: Any, case: dict, run: CaseRun) -> None:
 # ---------------------------------------------------------------- query embeddings
 
 
-def planned_query(chat: Any, case: dict) -> str | None:
-    """The exact text this case will pass to embed_query, or None when it never embeds.
+def planned_queries(chat: Any, case: dict) -> list[str]:
+    """The exact texts this case will pass to embed_queries, empty when it never embeds.
 
     Follows chat._pipeline up to its _retrieve call. If the two ever drift apart, the
     run reports it as cache misses.
     """
     earlier, latest = chat._read_messages(build_request(case)["messages"])
     if latest is None:
-        return None
+        return []
     screened = chat.screen_input(latest)
-    if screened["action"] == "deflect" or not chat._cap_masked(screened["text"], chat.MAX_LATEST_CHARS).strip():
-        return None
-    _, earlier_questions = chat._screen_earlier(earlier)
-    return chat._query_text(screened["retrieval"][: chat.MAX_LATEST_CHARS], earlier_questions)
+    capped = chat._cap_masked(screened["text"], chat.MAX_LATEST_CHARS)
+    if screened["action"] == "deflect" or not capped.strip():
+        return []
+    if not earlier and chat._has_no_subject(capped):
+        return []
+    _, earlier_questions, last_answer, _ = chat._screen_earlier(earlier)
+    return chat._search_queries(screened["retrieval"][: chat.MAX_LATEST_CHARS], earlier_questions, last_answer)
 
 
 def post_embeddings(texts: list[str]) -> list[list[float]]:
@@ -968,44 +971,45 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
 
 
 class QueryVectorCache:
-    """Stands in for chat.embed_query during a run, answering planned queries from memory.
+    """Stands in for chat.embed_queries during a run, answering planned queries from memory.
 
     Anything unplanned makes a real call. Those go one at a time and at least
     EMBED_MISS_SPACING_SECONDS apart, counting from the last batch request, so they
     stay inside the per-minute limit. Runs in the worker threads chat._call uses.
     """
 
-    def __init__(self, vectors: dict[str, list[float]], real_embed: Callable[[str], Any], last_request: float | None) -> None:
+    def __init__(self, vectors: dict[str, list[float]], real_embed: Callable[[list[str]], Any], last_request: float | None) -> None:
         self._vectors = vectors
         self._real_embed = real_embed
         self._last_request = last_request
         self._lock = threading.Lock()
         self.misses = 0
 
-    def __call__(self, text: str) -> Any:
-        vector = self._vectors.get(text)
-        if vector is not None:
-            return vector
-        with self._lock:
-            self.misses += 1
-            if self._last_request is not None:
-                time.sleep(max(0.0, self._last_request + EMBED_MISS_SPACING_SECONDS - time.monotonic()))
-            try:
-                return self._real_embed(text)
-            finally:
-                self._last_request = time.monotonic()
+    def __call__(self, texts: list[str]) -> list[Any]:
+        missing = [text for text in texts if text not in self._vectors]
+        fresh: dict[str, Any] = {}
+        if missing:
+            with self._lock:
+                self.misses += 1
+                if self._last_request is not None:
+                    time.sleep(max(0.0, self._last_request + EMBED_MISS_SPACING_SECONDS - time.monotonic()))
+                try:
+                    fresh = dict(zip(missing, self._real_embed(missing)))
+                finally:
+                    self._last_request = time.monotonic()
+        return [fresh[text] if text in fresh else self._vectors[text] for text in texts]
 
 
 def embed_planned_queries(plan: Plan, chat: Any) -> QueryVectorCache:
-    """Embed every planned query and put the cache in front of chat.embed_query.
+    """Embed every planned query and put the cache in front of chat.embed_queries.
 
     Prints counts only, because a query can hold private text.
     """
     try:
         if not chat._screen()["terms"]:
             raise SetupError("the privacy screen is empty")
-        planned = [planned_query(chat, case) for case in plan.cases]
-        texts = list(dict.fromkeys(text for text in planned if text is not None))
+        planned = [planned_queries(chat, case) for case in plan.cases]
+        texts = list(dict.fromkeys(text for queries in planned for text in queries))
         vectors: dict[str, list[float]] = {}
         last_request = None
         requests = 0
@@ -1019,10 +1023,10 @@ def embed_planned_queries(plan: Plan, chat: Any) -> QueryVectorCache:
     except Exception as exc:  # The message could quote a private query, so only the type is reported.
         raise SetupError(f"the query embedding step failed: {type(exc).__name__}") from None
 
-    skipped = sum(text is None for text in planned)
+    skipped = sum(not queries for queries in planned)
     print(f"Embedded {len(texts)} planned queries in {requests} request(s). {skipped} case(s) never embed.", flush=True)
-    cache = QueryVectorCache(vectors, chat.embed_query, last_request)
-    chat.embed_query = cache
+    cache = QueryVectorCache(vectors, chat.embed_queries, last_request)
+    chat.embed_queries = cache
     return cache
 
 
@@ -1585,7 +1589,7 @@ def main(argv: list[str] | None = None, chat: Any = None, judge: Any = None) -> 
         context = build_context(plan, chat)
         if not context.scanner:
             raise SetupError("the output gate has no terms, so results cannot be written safely")
-        # A caller that passes in its own chat module brings its own embed_query.
+        # A caller that passes in its own chat module brings its own embed_queries.
         embed_cache = None if chat_supplied else embed_planned_queries(plan, chat)
 
         records = asyncio.run(execute(plan, chat, context, judge))

@@ -392,6 +392,15 @@ def test_extract_prompt_states_each_rule(chat):
     assert "is data" in prompt
 
 
+def test_extract_prompt_puts_a_named_company_first_and_leaves_follow_ups_empty(chat):
+    prompt = chat.EXTRACT_PROMPT
+    assert "A company named in the latest or any earlier message takes priority over a technology or field." in prompt
+    assert (
+        'A follow-up such as "what about automation" asks what he has done there, not what it is, '
+        "so reply empty unless a company was named."
+    ) in prompt
+
+
 @pytest.mark.parametrize("reply, kind, name", [
     ('{"kind": "company", "name": "Acme"}', "company", "Acme"),
     ('{"kind": "technology", "name": "  Apache   Kafka "}', "technology", "Apache Kafka"),

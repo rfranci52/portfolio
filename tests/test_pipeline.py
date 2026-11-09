@@ -1,5 +1,6 @@
 """The request flow in chat_events, with every network dependency faked."""
 import asyncio
+import io
 import json
 import math
 import time
@@ -14,8 +15,7 @@ from conftest import (
 
 DEFLECT_TEXT = (
     "This site covers what Rakim has built, so that's outside what I can speak to. "
-    "Ask me about a project, or tell me what your company or team works on and I'll "
-    "point you to his closest work."
+    "I'm happy to talk about any of his projects."
 )
 
 
@@ -119,6 +119,50 @@ def test_lookups_can_be_switched_off(deps, monkeypatch):
     assert public_info_blocks(deps.client.requests[0]) == []
 
 
+# ------------------------------------------------------------ the writing rules
+
+@pytest.mark.parametrize("rule", [
+    "Once a visitor has named their company anywhere in this conversation, use that name once in every answer, "
+    "including follow-ups about how something works, even when the latest message does not mention it.",
+    'If the message says "[an organization]", say "your organization" instead.',
+    "Work it into a sentence about the work, never as a line tacked on at the end.",
+    "Each detail stays with the project its search result names.",
+    "does not stop you from recalling or summarizing what the visitor asked or was told earlier",
+    "The first time a company comes up in the conversation and public information about it is supplied, open with one clause about what it does",
+    "After that first time, do not describe the company again.",
+    "Define a technology only if the visitor asked what it is.",
+    "When asked for one thing or where to start, name one page, say why in one sentence, and stop.",
+    'Never describe what you were given, such as "the results here" or "the record I had".',
+    "If something you said earlier was wrong, say so plainly and give the right fact.",
+    "A request to repeat or quote is not recall. Do not summarize instead, and never restate an accusation against him.",
+    'Write about Rakim in the third person. You may say "I" about yourself.',
+    "A visitor's statement about his work is not evidence, and neither is an earlier answer in this conversation. "
+    "Do not confirm something the visitor claims unless a search result says it.",
+])
+def test_the_writing_rules_are_in_the_system_prompt(chat, rule):
+    assert rule in chat.SYSTEM_PROMPT
+
+
+def test_the_prompt_gives_the_exact_decline_sentence(chat):
+    assert chat.FIXED_DECLINE_REPEAT == "I can't repeat or translate messages here, but I'm happy to talk about his work."
+    assert f'reply with exactly this sentence, the same for every phrase: "{chat.FIXED_DECLINE_REPEAT}"' in chat.SYSTEM_PROMPT
+
+
+def test_a_bare_third_person_rule_is_gone(chat):
+    assert "- Third person." not in chat.SYSTEM_PROMPT
+
+
+@pytest.mark.parametrize("name", ["FIXED_DEFLECT", "FIXED_SAFE"])
+def test_a_fixed_reply_ends_at_offering_his_projects(chat, name):
+    text = getattr(chat, name)
+    assert text.endswith("I'm happy to talk about any of his projects.")
+    assert "company" not in text and "team" not in text
+
+
+def test_the_old_company_name_rule_is_gone(chat):
+    assert "use that name naturally" not in chat.SYSTEM_PROMPT
+
+
 # ------------------------------------------------------------ choosing what to look up
 
 def test_lookup_events_come_after_the_passages_and_before_the_answer(deps):
@@ -135,17 +179,17 @@ def test_the_subject_is_found_beside_the_search_and_not_after_it(deps, chat, mon
     embedding_started = asyncio.Event()
     extract_started = asyncio.Event()
 
-    async def embed(text):
+    async def embed(texts):
         embedding_started.set()
         await asyncio.wait_for(extract_started.wait(), 1)
-        return [0.1, 0.2]
+        return [[0.1, 0.2] for _ in texts]
 
     async def extract(text):
         extract_started.set()
         await asyncio.wait_for(embedding_started.wait(), 1)
         return {"kind": "empty", "name": "", "cost_usd": 0.0, "ok": True}
 
-    monkeypatch.setattr(chat, "embed_query", embed)
+    monkeypatch.setattr(chat, "embed_queries", embed)
     monkeypatch.setattr(chat, "extract_subject", extract)
     deps.script(answer("He built a tool for that purpose."))
     deps.run("What has he built?")
@@ -177,6 +221,40 @@ def test_a_company_named_earlier_reaches_extraction(deps):
         {"role": "user", "content": question},
     ])
     assert deps.extract_calls == [f"{question}\nI work at Acme."]
+
+
+def test_every_earlier_question_reaches_extraction_newest_first(deps):
+    deps.script(answer("He built a tool for that purpose."))
+    history = []
+    for i in range(14):
+        history += [{"role": "user", "content": f"question {i}"}, {"role": "assistant", "content": f"answer {i}"}]
+    deps.run(messages=history + [{"role": "user", "content": "the latest"}])
+    assert deps.extract_calls == ["\n".join(["the latest"] + [f"question {i}" for i in range(13, -1, -1)])]
+
+
+def test_extraction_input_is_capped_and_still_sees_the_first_message(deps, chat):
+    deps.script(answer("He built a tool for that purpose."))
+    questions = [f"I work at Firstco{i}. " + "x" * 800 for i in range(14)]
+    history = []
+    for question in questions:
+        history += [{"role": "user", "content": question[:800]}, {"role": "assistant", "content": "Noted."}]
+    deps.run(messages=history + [{"role": "user", "content": "y" * 800}])
+    text = deps.extract_calls[0]
+    assert len(text) <= chat.MAX_SUBJECT_CHARS + 14
+    assert all(f"Firstco{i}." in text for i in range(14))
+    assert text.startswith("y" * 800)
+
+
+def test_a_cut_in_the_extraction_input_never_splits_the_mask(chat):
+    earlier = [{"role": "user", "content": "x" * 3 + chat.MASK + "tail"}] * 2
+    limit = chat.MAX_SUBJECT_CHARS
+    text = chat._subject_text("z" * (limit - 8), earlier)
+    assert text == "\n".join(["z" * (limit - 8), "xxx", "xxx"])
+
+
+def test_a_short_conversation_reads_each_earlier_question_up_to_the_old_limit(chat):
+    earlier = [{"role": "user", "content": "x" * 900}]
+    assert chat._subject_text("latest", earlier) == "latest\n" + "x" * chat.MAX_LATEST_CHARS
 
 
 def test_only_the_visitors_words_reach_extraction(deps):
@@ -284,7 +362,7 @@ def test_a_name_never_reaches_anything_past_the_screen(deps, chat):
     assert "[an organization]" in dump(deps.client.requests)
     assert "[an organization]" in deps.extract_calls[0]
     assert deps.org_calls == [] and deps.lookup_calls == []
-    assert "[an organization]" not in deps.embed_calls[0]
+    assert deps.embed_calls[0] and not any("[an organization]" in text for text in deps.embed_calls[0])
     assert deps.search_calls[0][1] == deps.embed_calls[0]
     assert "input_name" in deps.logged[0]["flags"]
 
@@ -300,7 +378,10 @@ def test_extraction_gets_the_mask_and_never_the_stand_in_name(deps):
     assert deps.extract_calls == ["And [an organization] again?\nI am at [an organization]."]
     stand_ins = ("harborline", "cedar point", "harrowgate")
     assert not any(name in deps.extract_calls[0].lower() for name in stand_ins)
-    assert any(name in deps.search_calls[0][1].lower() for name in stand_ins)
+    assert len(deps.search_calls[0][1]) == 2
+    for query in deps.search_calls[0][1]:
+        assert any(name in query.lower() for name in stand_ins)
+        assert "[an organization]" not in query
 
 
 def test_a_masked_name_gets_the_same_treatment_as_an_unknown_company(deps, chat):
@@ -548,12 +629,46 @@ def test_reduced_search_tells_the_model_not_to_claim_absence(deps, chat, monkeyp
     def broken(text):
         raise RuntimeError("rate limited")
 
-    monkeypatch.setattr(chat, "embed_query", broken)
+    monkeypatch.setattr(chat, "embed_queries", broken)
     deps.script(model_turn(["I could not confirm that just now."]))
     deps.run("Does his work use event sourcing?")
     assert "embed_failed" in deps.logged[0]["flags"]
     texts = [block.get("text", "") for block in deps.client.requests[0]["messages"][-1]["content"]]
     assert chat.REDUCED_SEARCH_NOTE in texts
+
+
+def test_a_follow_up_keeps_both_searches_when_embedding_fails(deps, chat, monkeypatch):
+    def broken(texts):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr(chat, "embed_queries", broken)
+    deps.script(model_turn(["I could not confirm that just now."]))
+    deps.run(messages=[
+        {"role": "user", "content": "Tell me about the trading system."},
+        {"role": "assistant", "content": "It trades."},
+        {"role": "user", "content": "How long did it take?"},
+    ])
+    assert "embed_failed" in deps.logged[0]["flags"]
+    embeddings, queries = deps.search_calls[0]
+    assert embeddings is None and len(queries) == 2
+    texts = [block.get("text", "") for block in deps.client.requests[0]["messages"][-1]["content"]]
+    assert chat.REDUCED_SEARCH_NOTE in texts
+
+
+def test_a_reply_about_the_visitors_own_side_is_not_replaced(deps, chat):
+    reply = "He built a reporting tool that could save your larkspur several hours of manual work every single week."
+    deps.script(model_turn([reply]))
+    events = deps.run("My larkspur spends hours on reports. What relates?")
+    assert visible_text(events) == reply
+    assert "retract" not in types(events)
+    assert deps.logged[0]["outcome"] == "answered"
+
+
+def test_a_reply_about_his_side_is_still_replaced(deps, chat):
+    deps.script(model_turn(["He built a reporting tool that his larkspur reviewed and approved every single week of the year."]))
+    events = deps.run("What relates?")
+    assert visible_text(events) == chat.FIXED_SAFE
+    assert "output_deflect" in deps.logged[0]["flags"]
 
 
 def test_em_dash_and_links_are_cleaned_in_the_stream(deps):
@@ -973,7 +1088,7 @@ def test_embedding_failure_falls_back_to_keyword_search(deps, chat, monkeypatch)
     def broken(text):
         raise RuntimeError("provider is down")
 
-    monkeypatch.setattr(chat, "embed_query", broken)
+    monkeypatch.setattr(chat, "embed_queries", broken)
     deps.script(answer("He built a tool for this purpose."))
     deps.run("What has he built?")
     assert deps.search_calls[0][0] is None
@@ -988,13 +1103,28 @@ def test_latest_message_is_capped(deps):
     assert len(deps.client.requests[0]["messages"][-1]["content"][-1]["text"]) == 800
 
 
-def test_only_the_last_eight_messages_go_to_the_model(deps):
+def test_only_the_last_29_messages_go_to_the_model(deps, chat):
     deps.script(answer("He built a tool for this purpose."))
     history = []
-    for i in range(10):
+    for i in range(20):
         history += [{"role": "user", "content": f"q{i}"}, {"role": "assistant", "content": f"a{i}"}]
     deps.run(messages=history + [{"role": "user", "content": "last"}])
-    assert len(deps.client.requests[0]["messages"]) <= 8
+    sent = deps.client.requests[0]["messages"]
+    assert chat.MAX_MESSAGES == 29 and len(sent) == 29
+    assert sent[0] == {"role": "user", "content": "q6"}
+    assert sent[-2] == {"role": "assistant", "content": "a19"}
+
+
+def test_a_full_day_of_questions_all_reach_the_model(deps, chat):
+    deps.script(answer("He built a tool for this purpose."))
+    history = []
+    for i in range(14):
+        history += [{"role": "user", "content": f"question number {i}?"}, {"role": "assistant", "content": f"{i} " + "word " * 140}]
+    deps.run(messages=history + [{"role": "user", "content": "So back to the start."}])
+    sent = deps.client.requests[0]["messages"]
+    assert len(sent) == 29
+    assert sent[0]["content"] == "question number 0?"
+    assert sent[1]["content"].startswith("0 ") and len(sent[1]["content"]) > chat.MIN_EARLIER_ANSWER_CHARS
 
 
 def test_a_name_across_the_length_cut_is_still_caught(deps):
@@ -1017,38 +1147,80 @@ def test_a_long_answer_keeps_the_question_it_belongs_to(deps):
     deps.script(answer("He built a tool for this purpose."))
     deps.run(messages=[
         {"role": "user", "content": "Tell me about the trading system in detail."},
-        {"role": "assistant", "content": "a" * 2250},
+        {"role": "assistant", "content": "a" * 12250},
         {"role": "user", "content": "And how was it tested?"},
     ])
     earlier = deps.client.requests[0]["messages"][:-1]
     assert earlier[0] == {"role": "user", "content": "Tell me about the trading system in detail."}
     assert earlier[1]["role"] == "assistant"
-    assert sum(len(m["content"]) for m in earlier) == 2000
-    assert "trading system" in deps.embed_calls[0]
+    assert sum(len(m["content"]) for m in earlier) == 12000
+    assert "trading system" in deps.embed_calls[0][1]
 
 
 def test_earlier_turns_are_capped_in_total(deps):
     deps.script(answer("He built a tool for this purpose."))
     history = []
-    for i in range(3):
+    for i in range(8):
         history += [{"role": "user", "content": "u" * 900}, {"role": "assistant", "content": "a" * 900}]
     deps.run(messages=history + [{"role": "user", "content": "last"}])
     earlier = deps.client.requests[0]["messages"][:-1]
-    assert sum(len(m["content"]) for m in earlier) <= 2000
+    assert sum(len(m["content"]) for m in earlier) == 12000
     assert earlier[0]["role"] == "user"
 
 
-def test_short_follow_up_includes_the_previous_question(deps):
+def _budget(chat, *contents):
+    roles = ["user", "assistant"] * len(contents)
+    return chat._budget_earlier([{"role": role, "content": content} for role, content in zip(roles, contents)])
+
+
+def test_an_answer_that_would_be_a_stub_is_dropped_and_its_question_stays(chat):
+    # After the newest pair, 150 characters are left and the older question needs 100.
+    kept = _budget(chat, "q" * 100, "a" * 1000, "r" * 100, "b" * 11750)
+    assert [message["content"] for message in kept] == ["q" * 100, "r" * 100, "b" * 11750]
+
+
+def test_an_answer_cut_to_just_under_the_floor_is_dropped_and_just_at_it_is_kept(chat):
+    floor = chat.MIN_EARLIER_ANSWER_CHARS
+    newest = chat.MAX_EARLIER_CHARS - 100 - 100 - floor
+    at_floor = _budget(chat, "q" * 100, "a" * 1000, "r" * 100, "b" * newest)
+    assert len(at_floor) == 4 and at_floor[1]["content"] == "a" * floor
+    under_floor = _budget(chat, "q" * 100, "a" * 1000, "r" * 100, "b" * (newest + 1))
+    assert [message["role"] for message in under_floor] == ["user", "user", "assistant"]
+
+
+def test_a_short_answer_that_fits_is_kept_whole(chat):
+    kept = _budget(chat, "Where is it?", "Here.")
+    assert [message["content"] for message in kept] == ["Where is it?", "Here."]
+
+
+def test_a_short_answer_that_does_not_fit_is_not_cut(chat):
+    # An answer of 150 characters with 50 left would be a stub of it.
+    kept = _budget(chat, "q" * 100, "a" * 150, "r" * 100, "b" * 11750)
+    assert [message["content"] for message in kept] == ["q" * 100, "r" * 100, "b" * 11750]
+
+
+def test_a_first_message_is_searched_once(deps):
+    deps.script(answer("He built a tool for this purpose."))
+    deps.run("What has he built?")
+    assert deps.embed_calls == [["What has he built?"]]
+    assert len(deps.search_calls) == 1
+    assert deps.search_calls[0] == ([[0.1, 0.2]], ["What has he built?"])
+
+
+def test_a_follow_up_is_searched_alone_and_with_the_previous_exchange(deps):
     deps.script(answer("He built a tool for this purpose."))
     deps.run(messages=[
         {"role": "user", "content": "Tell me about the trading system."},
         {"role": "assistant", "content": "It trades."},
         {"role": "user", "content": "How long did it take?"},
     ])
-    assert "trading system" in deps.embed_calls[0] and "How long" in deps.embed_calls[0]
+    wanted = ["How long did it take?", "How long did it take?\nTell me about the trading system.\nIt trades."]
+    assert deps.embed_calls == [wanted]
+    assert len(deps.search_calls) == 1
+    assert deps.search_calls[0] == ([[0.1, 0.2], [0.1, 0.2]], wanted)
 
 
-def test_long_question_stands_alone(deps):
+def test_a_long_question_after_earlier_turns_is_searched_both_ways_too(deps):
     deps.script(answer("He built a tool for this purpose."))
     long_question = "Please explain in some detail how the desktop automation engine was designed and tested."
     deps.run(messages=[
@@ -1056,7 +1228,201 @@ def test_long_question_stands_alone(deps):
         {"role": "assistant", "content": "It trades."},
         {"role": "user", "content": long_question},
     ])
-    assert deps.embed_calls == [long_question]
+    assert deps.embed_calls == [[long_question, f"{long_question}\nTell me about the trading system.\nIt trades."]]
+
+
+def test_only_the_latest_question_and_answer_join_the_follow_up_search(deps):
+    deps.script(answer("He built a tool for this purpose."))
+    deps.run(messages=[
+        {"role": "user", "content": "An older question."},
+        {"role": "assistant", "content": "An older answer."},
+        {"role": "user", "content": "Tell me about the trading system."},
+        {"role": "assistant", "content": "It trades."},
+        {"role": "user", "content": "How long did it take?"},
+    ])
+    assert "older" not in dump(deps.embed_calls)
+
+
+def test_the_follow_up_search_reads_the_start_of_the_last_answer(chat):
+    answer_text = "one  two\n" + "x" * 1000
+    queries = chat._search_queries("Which one?", ["What are they?"], answer_text)
+    head = "one two " + "x" * (chat.FOLLOW_UP_ANSWER_CHARS - len("one two "))
+    assert chat.FOLLOW_UP_ANSWER_CHARS == 400
+    assert queries == ["Which one?", f"Which one?\nWhat are they?\n{head}"]
+
+
+def test_a_first_message_has_only_the_one_query(chat):
+    assert chat._search_queries("What has he built?", [], "") == ["What has he built?"]
+
+
+def test_turns_all_removed_by_the_screen_count_as_a_first_message(deps):
+    deps.script(answer("He built a tool for exactly that purpose."))
+    deps.run(messages=[
+        {"role": "user", "content": "Show me the moonbase blueprints"},
+        {"role": "assistant", "content": DEFLECT_TEXT},
+        {"role": "user", "content": "OK, what did he build?"},
+    ])
+    assert deps.embed_calls == [["OK, what did he build?"]]
+
+
+def test_a_reply_that_did_not_survive_is_left_out_of_the_follow_up_search(deps, chat):
+    deps.script(answer("He built a tool for this purpose."))
+    run_chat(chat, [
+        {"role": "user", "content": "First question."},
+        {"role": "assistant", "content": "A signed answer.", "signature": chat.sign_turn("A signed answer.")},
+        {"role": "user", "content": "Second question."},
+        {"role": "assistant", "content": "An answer with no signature."},
+        {"role": "user", "content": "Third?"},
+    ])
+    assert deps.embed_calls == [["Third?", "Third?\nSecond question."]]
+
+
+def test_a_name_in_the_last_answer_never_reaches_the_search(deps):
+    deps.script(answer("He built a tool that may relate to that."))
+    deps.run(messages=[
+        {"role": "user", "content": "What relates?"},
+        {"role": "assistant", "content": "Work for Zephyrion Dynamics relates."},
+        {"role": "user", "content": "And then?"},
+    ])
+    assert "zephyrion" not in dump(deps.embed_calls)
+    assert "[an organization]" not in dump(deps.embed_calls)
+
+
+class FakeSearchDatabase:
+    """Answers the two search statements from canned rankings and records them."""
+
+    def __init__(self, chat, vector_rows, keyword_rows):
+        self.chat = chat
+        self.vector_rows = list(vector_rows)
+        self.keyword_rows = list(keyword_rows)
+        self.statements = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params):
+        self.statements.append(("vector" if sql is self.chat._VECTOR_SQL else "keyword", params[0]))
+        rows = self.vector_rows if sql is self.chat._VECTOR_SQL else self.keyword_rows
+        return NS(fetchall=lambda: rows.pop(0))
+
+
+def chunk(doc, section):
+    return {"id": f"{doc}:{section}", "doc": doc, "title": doc, "section": section, "url": "/", "content": f"About {section}."}
+
+
+def test_every_ranking_of_both_searches_goes_into_one_merge(chat, monkeypatch):
+    database = FakeSearchDatabase(
+        chat,
+        vector_rows=[[chunk("a", "first-vector")], [chunk("b", "both"), chunk("c", "second-vector")]],
+        keyword_rows=[[chunk("d", "first-keyword")], [chunk("b", "both")]],
+    )
+    monkeypatch.setattr(chat, "_connect", lambda url: database)
+    results = chat.search_chunks([[0.5], [0.25]], ["latest", "latest with context"])
+    assert database.statements == [
+        ("vector", "[0.5]"), ("keyword", "latest"), ("vector", "[0.25]"), ("keyword", "latest with context"),
+    ]
+    assert results[0]["id"] == "b:both"
+    assert results[0]["score"] == round(2 / (chat.RRF_K + 1), 5)
+    assert {row["id"] for row in results} == {"a:first-vector", "b:both", "c:second-vector", "d:first-keyword"}
+
+
+def crowded_rankings(chat, latest_vector, latest_keyword):
+    """Nine passages strong in every ranking, which push out a top hit found by one list only."""
+    crowd = [chunk(f"crowd{index}", "section") for index in range(9)]
+    return FakeSearchDatabase(
+        chat,
+        vector_rows=[[latest_vector] + crowd, list(crowd)],
+        keyword_rows=[[latest_keyword] + crowd, list(crowd)],
+    )
+
+
+def test_the_top_hits_of_the_latest_message_alone_survive_the_merge(chat, monkeypatch):
+    top_vector, top_keyword = chunk("skills", "languages"), chunk("background", "learning")
+    database = crowded_rankings(chat, top_vector, top_keyword)
+    monkeypatch.setattr(chat, "_connect", lambda url: database)
+    results = chat.search_chunks([[0.5], [0.25]], ["latest", "latest with context"])
+    ids = [row["id"] for row in results]
+    assert len(ids) == chat.RRF_TOP + 2
+    assert ids[-2:] == ["skills:languages", "background:learning"]
+    assert all(row["snippet"] and row["score"] for row in results)
+
+
+def test_only_the_latest_message_alone_gets_its_top_hits_kept(chat, monkeypatch):
+    crowd = [chunk(f"crowd{index}", "section") for index in range(9)]
+    context_top = chunk("other", "context-only")
+    database = FakeSearchDatabase(
+        chat,
+        vector_rows=[list(crowd), [context_top] + crowd],
+        keyword_rows=[list(crowd), list(crowd)],
+    )
+    monkeypatch.setattr(chat, "_connect", lambda url: database)
+    ids = [row["id"] for row in chat.search_chunks([[0.5], [0.25]], ["latest", "latest with context"])]
+    assert "other:context-only" not in ids
+    assert len(ids) == chat.RRF_TOP
+    assert ids[0] == "crowd0:section"
+
+
+def test_a_top_hit_already_in_the_set_is_not_added_twice(chat, monkeypatch):
+    shared = chunk("skills", "languages")
+    database = FakeSearchDatabase(chat, vector_rows=[[shared]], keyword_rows=[[shared]])
+    monkeypatch.setattr(chat, "_connect", lambda url: database)
+    assert [row["id"] for row in chat.search_chunks([[0.5]], ["latest"])] == ["skills:languages"]
+
+
+def test_with_no_embeddings_the_keyword_top_hit_is_still_kept(chat, monkeypatch):
+    crowd = [chunk(f"crowd{index}", "section") for index in range(9)]
+    database = FakeSearchDatabase(chat, vector_rows=[], keyword_rows=[[chunk("skills", "languages")] + crowd, list(crowd), list(crowd)])
+    monkeypatch.setattr(chat, "_connect", lambda url: database)
+    ids = [row["id"] for row in chat.search_chunks(None, ["latest", "latest with context", "third"])]
+    assert "skills:languages" in ids
+
+
+def test_a_kept_id_ignores_the_per_document_caps(chat):
+    gaps = [{"id": f"{chat.GAPS_DOC}:{index}", "content": "c"} for index in range(4)]
+    merged = chat.rrf_merge(gaps, keep=[f"{chat.GAPS_DOC}:3"])
+    assert [row["id"] for row in merged] == [f"{chat.GAPS_DOC}:0", f"{chat.GAPS_DOC}:1", f"{chat.GAPS_DOC}:3"]
+
+
+def test_a_kept_id_no_ranking_returned_is_ignored(chat):
+    assert [row["id"] for row in chat.rrf_merge([{"id": "a:b", "content": "c"}], keep=["x:y"])] == ["a:b"]
+
+
+def test_with_no_embeddings_each_search_still_runs_by_keyword(chat, monkeypatch):
+    database = FakeSearchDatabase(chat, vector_rows=[], keyword_rows=[[chunk("a", "one")], [chunk("b", "two")]])
+    monkeypatch.setattr(chat, "_connect", lambda url: database)
+    results = chat.search_chunks(None, ["latest", "latest with context"])
+    assert database.statements == [("keyword", "latest"), ("keyword", "latest with context")]
+    assert {row["id"] for row in results} == {"a:one", "b:two"}
+
+
+def voyage_replies(chat, monkeypatch, rows):
+    """Stands in for the Voyage endpoint. Returns the list of request bodies it received."""
+    received = []
+
+    def urlopen(request, timeout=None):
+        received.append(json.loads(request.data))
+        return io.BytesIO(json.dumps({"data": rows}).encode("utf-8"))
+
+    monkeypatch.setattr(chat.urllib.request, "urlopen", urlopen)
+    return received
+
+
+def test_both_searches_are_embedded_in_one_request_and_keep_their_order(chat, monkeypatch):
+    received = voyage_replies(chat, monkeypatch, [
+        {"index": 1, "embedding": [0.2]},
+        {"index": 0, "embedding": [0.1]},
+    ])
+    assert chat.embed_queries(["latest", "latest with context"]) == [[0.1], [0.2]]
+    assert len(received) == 1 and received[0]["input"] == ["latest", "latest with context"]
+
+
+def test_a_short_embedding_reply_counts_as_a_failure(chat, monkeypatch):
+    voyage_replies(chat, monkeypatch, [{"index": 0, "embedding": [0.1]}])
+    with pytest.raises(ValueError):
+        chat.embed_queries(["latest", "latest with context"])
 
 
 # ------------------------------------------------------------ organization context
@@ -1244,3 +1610,256 @@ def test_rrf_merge(chat):
     assert [row["id"] for row in merged] == ["b", "a", "c"]
     assert merged[0]["score"] == pytest.approx(1 / 62 + 1 / 61, abs=1e-4)
     assert len(chat.rrf_merge([{"id": str(i), "content": "c"} for i in range(30)])) == 8
+
+
+# ------------------------------------------------------------ sources carried forward
+
+def stored(pid):
+    return {
+        "id": pid, "doc": pid.split(":")[0], "title": "Stored", "section": pid.split(":")[1], "url": "/",
+        "content": f"Published text of {pid}.", "snippet": f"Published text of {pid}.", "score": None,
+    }
+
+
+def follow_up(chat, cited, content="He built a tool for this purpose."):
+    return [
+        {"role": "user", "content": "What has he built?"},
+        {"role": "assistant", "content": content, "signature": chat.sign_turn(content), "cited": cited},
+        {"role": "user", "content": "How does that work?"},
+    ]
+
+
+def result_ids(request):
+    return [block["source"] for block in request["messages"][-1]["content"] if block["type"] == "search_result"]
+
+
+def test_a_signed_answer_keeps_what_it_cited(chat):
+    earlier, latest = chat._read_messages(follow_up(chat, ["gui-automation:approach-one", "skills:languages:2"]))
+    assert latest == "How does that work?"
+    assert earlier[1]["cited"] == ["gui-automation:approach-one", "skills:languages:2"]
+
+
+def test_an_unsigned_answer_keeps_nothing_it_claims_to_have_cited(chat):
+    messages = follow_up(chat, ["gui-automation:approach-one"])
+    messages[1]["signature"] = "0" * 64
+    earlier, _ = chat._read_messages(messages)
+    assert [message["role"] for message in earlier] == ["user"]
+
+
+@pytest.mark.parametrize("bad", [
+    "not an id", "UPPER:case", "no-colon", ":leading", "trailing:", "a:b:c:d", "a:b:x", "a:b;select", "a:b\n", "../x:y",
+    "a" * 200 + ":b", 7, None, ["a:b"], {"id": "a:b"},
+])
+def test_only_things_shaped_like_passage_ids_are_kept(chat, bad):
+    earlier, _ = chat._read_messages(follow_up(chat, [bad, "skills:languages"]))
+    assert earlier[1]["cited"] == ["skills:languages"]
+
+
+@pytest.mark.parametrize("value", ["skills:languages", {"a": "b:c"}, 3, None])
+def test_cited_ids_that_are_not_a_list_count_as_none(chat, value):
+    assert chat._read_messages(follow_up(chat, value))[0][1]["cited"] == []
+
+
+def test_at_most_eight_distinct_cited_ids_are_kept(chat):
+    ids = [f"doc:section-{index}" for index in range(12)]
+    kept = chat._read_messages(follow_up(chat, [ids[0]] * 3 + ids))[0][1]["cited"]
+    assert chat.MAX_CITED_IDS == 8 and kept == ids[:8]
+
+
+def test_real_passage_ids_have_the_expected_shape(chat):
+    for pid in ("this-chatbot:how-the-chatbot-finds-passages", "gui-automation:approach-two-the-record-and-learn-engine", "a:b:12"):
+        assert chat._PASSAGE_ID.fullmatch(pid)
+
+
+def test_passages_the_last_answer_cited_are_added_after_the_ranked_ones(deps, chat):
+    deps.stored_passages = {pid: stored(pid) for pid in ("a:one", "b:two", "c:three")}
+    deps.script(answer("He built a tool for this purpose.", cited=("b:two",)))
+    events = deps.run(messages=follow_up(chat, ["a:one", "b:two", "c:three"]))
+    assert deps.fetch_calls == [["a:one", "b:two", "c:three"]]
+    assert result_ids(deps.client.requests[0]) == ["gui#overview", "trading#lessons", "a:one", "b:two", "c:three"]
+    assert [item["id"] for item in events[1]["items"]][-3:] == ["a:one", "b:two", "c:three"]
+    assert done(events)["cited"] == ["b:two"]
+
+
+def test_at_most_three_cited_passages_are_added(deps, chat):
+    ids = [f"doc:section-{index}" for index in range(8)]
+    deps.stored_passages = {pid: stored(pid) for pid in ids}
+    deps.script(answer("He built a tool for this purpose."))
+    deps.run(messages=follow_up(chat, ids))
+    assert deps.fetch_calls == [ids[:3]]
+
+
+def test_a_cited_passage_the_search_found_is_not_fetched_or_repeated(deps, chat):
+    deps.passages = [{**stored("a:one"), "score": 0.03}]
+    deps.script(answer("He built a tool for this purpose."))
+    deps.stored_passages = {"b:two": stored("b:two")}
+    deps.run(messages=follow_up(chat, ["a:one", "b:two"]))
+    assert deps.fetch_calls == [["b:two"]]
+    assert result_ids(deps.client.requests[0]) == ["a:one", "b:two"]
+
+
+def test_nothing_is_fetched_when_the_search_found_every_citation(deps, chat):
+    deps.passages = [{**stored("a:one"), "score": 0.03}]
+    deps.script(answer("He built a tool for this purpose."))
+    deps.run(messages=follow_up(chat, ["a:one"]))
+    assert deps.fetch_calls == []
+
+
+def test_only_the_most_recent_answer_is_carried_forward(deps, chat):
+    deps.stored_passages = {pid: stored(pid) for pid in ("old:one", "new:one")}
+    deps.script(answer("He built a tool for this purpose."))
+    older, newer = "An older answer.", "A newer answer."
+    deps.run(messages=[
+        {"role": "user", "content": "Older question?"},
+        {"role": "assistant", "content": older, "signature": chat.sign_turn(older), "cited": ["old:one"]},
+        {"role": "user", "content": "Newer question?"},
+        {"role": "assistant", "content": newer, "signature": chat.sign_turn(newer), "cited": ["new:one"]},
+        {"role": "user", "content": "And then?"},
+    ])
+    assert deps.fetch_calls == [["new:one"]]
+
+
+def test_an_answer_that_did_not_survive_carries_nothing_forward(deps, chat):
+    signed = "A signed answer."
+    deps.script(answer("He built a tool for this purpose."))
+    run_chat(chat, [
+        {"role": "user", "content": "First question."},
+        {"role": "assistant", "content": signed, "signature": chat.sign_turn(signed), "cited": ["a:one"]},
+        {"role": "user", "content": "Second question."},
+        {"role": "assistant", "content": "An answer with no signature.", "cited": ["b:two"]},
+        {"role": "user", "content": "Third?"},
+    ])
+    assert deps.fetch_calls == []
+
+
+def test_a_first_message_fetches_nothing(deps):
+    deps.script(answer("He built a tool for this purpose."))
+    deps.run("What has he built?")
+    assert deps.fetch_calls == []
+
+
+def test_a_failed_fetch_only_costs_the_extra_passages(deps, chat):
+    deps.stored_passages = RuntimeError("database down")
+    deps.script(answer("He built a tool for this purpose."))
+    events = deps.run(messages=follow_up(chat, ["a:one"]))
+    assert result_ids(deps.client.requests[0]) == ["gui#overview", "trading#lessons"]
+    assert visible_text(events) == "He built a tool for this purpose."
+    assert "cited_fetch_failed" in deps.logged[0]["flags"]
+
+
+def test_cited_ids_never_go_to_the_model_in_the_conversation(deps, chat):
+    deps.stored_passages = {"a:one": stored("a:one")}
+    deps.script(answer("He built a tool for this purpose."))
+    deps.run(messages=follow_up(chat, ["a:one"]))
+    assert all(set(message) == {"role", "content"} for message in deps.client.requests[0]["messages"])
+
+
+def test_fetching_by_id_keeps_the_order_asked_for_and_skips_unknown_ids(chat, monkeypatch):
+    statements = []
+
+    class Database:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params):
+            statements.append((sql, params))
+            return NS(fetchall=lambda: [chunk("b", "two"), chunk("a", "one")])
+
+    monkeypatch.setenv("SITE_SEARCH_URL", "postgres://search-role")
+    urls = []
+    monkeypatch.setattr(chat, "_connect", lambda url: urls.append(url) or Database())
+    rows = chat.fetch_passages(["a:one", "gone:three", "b:two"])
+    assert [row["id"] for row in rows] == ["a:one", "b:two"]
+    assert rows[0]["snippet"] == "About one." and rows[0]["score"] is None
+    assert urls == ["postgres://search-role"]
+    assert statements == [(chat._PASSAGES_BY_ID_SQL, (["a:one", "gone:three", "b:two"],))]
+
+
+# ------------------------------------------------------------ a first message with no subject
+
+NO_SUBJECT_MESSAGES = [
+    "tell me more", "continue", "yes", "ok do that", "what about it", "Tell me more!", "CONTINUE.", "Yes please",
+    "ok", "okay", "go on", "go ahead", "keep going", "more", "more please", "what about that?", "tell me about it",
+    "do it", "the second one", "the other one", "that one", "and then", "what else", "please elaborate", "explain that",
+    "more on that", "again", "sure, go ahead", "yes, go on please",
+]
+
+REAL_SHORT_QUESTIONS = [
+    "languages?", "why trading", "python?", "sql", "react?", "go?", "Go", "what about Go?", "IT?", "what about IT", "Next?",
+    "skills", "projects", "demo", "contact", "resume", "experience", "trading", "casedesk", "why", "how", "who",
+    "who is he", "what is this", "what does he do", "what has he built", "tell me about him", "tell me about yourself",
+    "tell me about rakim", "tell me more about trading", "what about python", "what about the demo", "more about casedesk",
+    "first project", "last project", "other projects", "next steps", "one project", "same stack?", "is it live",
+    "does it work", "how does it work", "why is that", "how so", "what do you do", "can he code", "hello", "hi",
+    "what is RAG", "AI?", "automation", "do you know sql", "does he know go",
+]
+
+
+@pytest.mark.parametrize("message", NO_SUBJECT_MESSAGES)
+def test_a_first_message_with_no_subject_gets_the_fixed_reply(deps, chat, message):
+    events = deps.run(message)
+    assert types(events) == ["delta", "done"]
+    assert visible_text(events) == chat.FIXED_NO_SUBJECT
+    assert deps.client.requests == [] and deps.embed_calls == [] and deps.search_calls == [] and deps.extract_calls == []
+
+
+def test_the_no_subject_reply_has_the_agreed_wording(chat):
+    assert chat.FIXED_NO_SUBJECT == "What would you like to know about his work? You can ask about a project or how he built something."
+
+
+@pytest.mark.parametrize("message", REAL_SHORT_QUESTIONS)
+def test_a_real_short_question_is_never_taken_for_no_subject(chat, message):
+    assert chat._has_no_subject(message) is False
+
+
+@pytest.mark.parametrize("message", NO_SUBJECT_MESSAGES[:6])
+def test_the_same_words_after_an_earlier_turn_reach_the_model(deps, chat, message):
+    deps.script(answer("He built a tool for this purpose."))
+    events = deps.run(messages=[
+        {"role": "user", "content": "What has he built?"},
+        {"role": "assistant", "content": "He built a reporting tool."},
+        {"role": "user", "content": message},
+    ])
+    assert visible_text(events) == "He built a tool for this purpose."
+    assert len(deps.client.requests) == 1
+
+
+def test_a_no_subject_reply_counts_against_no_limit(deps):
+    deps.quota_allowed = False
+    deps.spend_allowed = False
+    events = deps.run("tell me more")
+    assert types(events) == ["delta", "done"]
+    assert deps.quota_calls == [] and deps.spend_checks == 0
+    assert done(events)["model"] is None and done(events)["cost_usd"] == 0
+    assert deps.spend_recorded == []
+
+
+def test_a_no_subject_reply_is_logged_under_its_own_outcome(deps):
+    deps.run("tell me more")
+    assert deps.log_slot_calls == ["203.0.113.9"]
+    assert deps.logged[0]["outcome"] == "no_subject"
+
+
+def test_a_no_subject_reply_leaves_no_row_past_the_log_limit(deps):
+    deps.log_slot_allowed = False
+    assert types(deps.run("tell me more")) == ["delta", "done"]
+    assert deps.logged == []
+
+
+def test_a_no_subject_reply_is_unsigned_so_it_never_becomes_context(deps):
+    finished = done(deps.run("tell me more"))
+    assert finished["signature"] == "" and finished["cited"] == []
+
+
+@pytest.mark.parametrize("message", ["?", "...", "   !  "])
+def test_punctuation_alone_is_not_taken_for_a_no_subject_message(chat, message):
+    assert chat._has_no_subject(message) is False
+
+
+def test_a_screened_name_is_not_taken_for_a_no_subject_message(deps, chat):
+    deps.script(answer("He built a tool for this purpose."))
+    deps.run("Zephyrion Dynamics")
+    assert len(deps.client.requests) == 1

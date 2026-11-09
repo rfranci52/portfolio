@@ -3,10 +3,10 @@ import type { ChatEvent, ChatMessage, StreamEnd, WireMessage } from './types'
 export const MAX_QUESTION_CHARS = 800
 
 // Earlier turns sent with a question, always whole question and answer pairs.
-const MAX_EARLIER_MESSAGES = 6
+const MAX_EARLIER_MESSAGES = 28
 
 // The server keeps this many characters of earlier turns, so sending more is wasted.
-const MAX_EARLIER_CHARS = 2000
+const MAX_EARLIER_CHARS = 12000
 
 const OVER_LIMIT = /over.?limit|quota|rate.?limit|daily limit/i
 
@@ -98,7 +98,7 @@ export function earlierTurns(messages: ChatMessage[]): WireMessage[] {
     if (question.role === 'user' && answer.role === 'assistant' && answer.state === 'done' && answer.content && answer.signature) {
       pairs.unshift(
         { role: 'user', content: question.content },
-        { role: 'assistant', content: answer.content, signature: answer.signature },
+        { role: 'assistant', content: answer.content, signature: answer.signature, cited: answer.cited ?? [] },
       )
       chars += question.content.length + answer.content.length
     }

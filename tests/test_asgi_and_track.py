@@ -164,8 +164,16 @@ def test_app_rejects_deep_nesting_cleanly(deps, chat):
 
 
 def test_app_rejects_an_oversized_body(deps, chat):
-    assert call_app(chat.app, headers=same_origin_headers(), body=b"x" * 40000, chunked=True)[0] == 413
+    assert chat.MAX_BODY_BYTES == 64 * 1024
+    assert call_app(chat.app, headers=same_origin_headers(), body=b"x" * 70000, chunked=True)[0] == 413
     assert deps.quota_calls == []
+
+
+def test_app_accepts_a_body_of_a_long_conversation(deps, chat):
+    deps.script(model_turn(["He built a tool for this purpose."]))
+    body = chat_body("What has he built? " + "x" * 50000)
+    assert 40000 < len(body) < chat.MAX_BODY_BYTES
+    assert call_app(chat.app, headers=same_origin_headers(), body=body)[0] == 200
 
 
 def test_app_handles_lifespan(chat):

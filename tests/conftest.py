@@ -20,6 +20,8 @@ TERMS = [
     ("deflect", False, "moonbase blueprints"),
     ("self", False, "rakim francis"),
     ("say", False, "vermilion protocol"),
+    ("deflect", False, "your larkspur"),
+    ("deflect", False, "his larkspur"),
 ]
 
 PASSAGES = [
@@ -179,6 +181,8 @@ class Deps:
         self.subject = None  # what the extraction step reports, or an Exception it raises
         self.embed_calls = []
         self.search_calls = []
+        self.fetch_calls = []
+        self.stored_passages = {}  # what fetching by id can find, or an Exception it raises
         self.org_calls = []
         self.lookup_calls = []
         self.quota_calls = []
@@ -195,8 +199,9 @@ class Deps:
         for name, replacement in {
             "new_client": lambda: self.client,
             "extract_subject": self._extract,
-            "embed_query": self._embed,
+            "embed_queries": self._embed,
             "search_chunks": self._search,
+            "fetch_passages": self._fetch,
             "lookup_org_db": self._org,
             "web_lookup": self._lookup,
             "take_quota_db": self._quota,
@@ -217,13 +222,19 @@ class Deps:
             raise self.subject
         return {"kind": "empty", "name": "", "cost_usd": 0.0, "ok": True, **(self.subject or {})}
 
-    def _embed(self, text):
-        self.embed_calls.append(text)
-        return [0.1, 0.2]
+    def _embed(self, texts):
+        self.embed_calls.append(list(texts))
+        return [[0.1, 0.2] for _ in texts]
 
-    def _search(self, embedding, query_text):
-        self.search_calls.append((embedding, query_text))
+    def _search(self, embeddings, queries):
+        self.search_calls.append((embeddings, list(queries)))
         return list(self.passages)
+
+    def _fetch(self, ids):
+        self.fetch_calls.append(list(ids))
+        if isinstance(self.stored_passages, Exception):
+            raise self.stored_passages
+        return [self.stored_passages[pid] for pid in ids if pid in self.stored_passages]
 
     def _org(self, hashes):
         self.org_calls.append(list(hashes))
