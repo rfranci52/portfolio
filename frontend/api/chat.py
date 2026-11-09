@@ -116,6 +116,7 @@ PROJECTS = {
     "gui-automation": ("GUI Automation for Legacy Systems, Demonstrated End to End", "/projects/gui-automation"),
     "legacy-cms-integration": ("Reporting and Integration for a Legacy System", "/projects/legacy-cms-integration"),
     "algorithmic-trading": ("Algorithmic Trading System", "/projects/algorithmic-trading"),
+    "fantasy-basketball-agent": ("An AI Agent That Runs a Fantasy Basketball Team", "/projects/fantasy-basketball-agent"),
     "portfolio-site": ("This Portfolio Site", "/projects/portfolio-site"),
     "live-demo": ("Live Demo", "https://demo.rakimfrancis.com"),
 }

@@ -162,6 +162,73 @@
     "created_at": "2026-07-11 03:17:48.138700"
   },
   {
+    "title": "An AI Agent That Runs a Fantasy Basketball Team",
+    "summary": "I built a system that manages my fantasy basketball team day to day without me. Claude makes the judgment calls through tool use: which free agent to add, which player to drop, and when, weighing injury news and minutes changes. Python does everything else, from ESPN reads and category math to lineups, and every write to ESPN passes guardrails the model has no way around. Three scheduled jobs have run it unattended on a Mac mini since October 17, 2026, under a hard monthly budget, with a code-only backup mode for when the model can't decide.",
+    "highlights": [
+      "Claude works through six tools that read the week, list available players, check injuries and news, score a move, and submit it. Its only path to a write is the submit tool, and that tool checks every rule again first",
+      "Key players are protected by two independent layers: the guardrails that judge each move, and a last check inside the one function every ESPN write goes through",
+      "Each of the nine categories gets a win chance from a normal approximation, percentages come from projected makes and attempts, and lineups are solved with maximum bipartite matching",
+      "A watcher checks often around games and wakes the model only on real triggers, with a daily cap",
+      "A spend ledger paces the model's effort under a hard monthly budget, and a code-only backup mode takes over behind the same guardrails when the model can't decide",
+      "As of November 9, 2026: first of 10 teams and 3-0 in matchups, after finishing 9th by hand last season. Three weeks is a small sample, and a better draft could explain some of it"
+    ],
+    "video_url": null,
+    "sort_order": 3,
+    "id": 5,
+    "tagline": "An artificial intelligence (AI) agent that manages my ESPN fantasy basketball team every day: Claude makes the judgment calls through tools, and code enforces every rule and owns every write.",
+    "slug": "fantasy-basketball-agent",
+    "tech": [
+      "Python",
+      "Claude (tool use)",
+      "Anthropic Python library",
+      "ESPN web endpoints",
+      "launchd",
+      "requests"
+    ],
+    "sections": [
+      {
+        "heading": "Why it exists",
+        "body": "Across four seasons in my league, the managers who kept rotating free agents through their rosters and set lineups every day finished at the top. I made 5 to 12 pickups a season and finished 6th, 5th, 8th and 9th. I knew what the job was and I wasn't doing it, because doing it means checking injuries, schedules and the waiver wire every single day. Most of that work is mechanical, so a script can do it. The part that isn't mechanical is the daily call: whose minutes are about to change, and whether he's worth one of the week's limited pickups. That split, mechanical work for code and the judgment call for a model, became the design."
+      },
+      {
+        "heading": "Claude decides, code enforces",
+        "body": "Claude gets the judgment call and nothing else. It works through six tools: read the week, list the available players, read the injury report, read a player's news, score a move, and submit a move. Every rule I care about is enforced in code, not left to the prompt: who can be dropped, the weekly pickup limit, a last pickup held back for injuries, whether a player is locked, and whether the move actually helps. The submit tool runs all of those again and refuses whatever they block, so a rule holds even if the model ignores it. The one thing I set as absolute was that none of my main players could ever be dropped, so they're protected twice: by the guardrails that judge each move, and by a separate last check inside the one function every ESPN write goes through, which refuses a protected drop no matter what code built the request."
+      },
+      {
+        "heading": "The math behind each call",
+        "body": "A head-to-head category week is nine small races, so each one gets a win chance. I project both teams' totals over the starter games they have left, compare the margin to its standard deviation, and read a win chance off a normal approximation. Expected category wins is the sum of the nine. Field goal and free throw percentages are never averaged: I project makes and attempts, then divide. Who can start on a given day is a maximum bipartite matching of players to the 10 starter seats, which handles position eligibility exactly and, with the best players seated first, decides who sits on crowded days. A move has to clear a test before it can happen. It must raise expected category wins or clearly lift a close category, it can't flip a projected win into a loss, it can't cost starter games unless the gain clearly outweighs them, and it's judged on top of any pending claims as if they land."
+      },
+      {
+        "heading": "Running unattended",
+        "body": "Three scheduled jobs run it on a Mac mini. The daily job runs overnight and waits for ESPN's waiver run, so the decision sees newly cleared players as soon as they're available. It settles the night's claims, lets Claude decide, and sets the day's lineup. Two lineup passes later in the day are code only. The watcher checks often while games are close or under way, and less often otherwise. Most of what it sees it handles in code. It wakes the model only on real triggers: one of my players newly ruled out, another team dropping someone whose best swap clears a bar, a free agent's ownership jumping, or a fresh injury that opens minutes for an available teammate. Those wakes are capped each day, with one always kept for my own players. Every move sends the reason to my phone."
+      },
+      {
+        "heading": "Bounded cost",
+        "body": "The model runs under a hard monthly budget. Every call is priced from its token usage and written to a spend ledger, and each day's decision gets a share of what's left. The code picks the highest effort level that share covers, using what decisions at each level have actually cost so far, so spending fast turns the effort down on its own."
+      },
+      {
+        "heading": "Failing safely",
+        "body": "Writes never retry on their own, because ESPN's endpoints have no idempotency key and a resend could make the same move twice. A write that gets no answer is recorded as unknown, counts against the limits until it's settled against ESPN's own records, and ends that run's moves. If the budget runs out, the Anthropic key is missing, or a model call fails before any move has been made, a code-only backup mode decides instead. It makes instant free-agent adds only, behind the same guardrails, with a bar that rises as the week's pickups run low. It can't read news, so it won't add anyone on the injury report. If a model call fails after a move has been made, the run just stops, and the next run starts from a fresh read. Since November 1, each daily run with pickups left also logs what backup mode would have done next to Claude's choice, so the gap can be measured instead of assumed."
+      },
+      {
+        "heading": "What it got wrong, and what changed",
+        "body": "On an early dry run, Claude reasoned that claiming a player early helps. Waivers in my league go by waiver order, so the tools now show our place in line, the instructions explain it, and a claim from anywhere but first gets a backup claim. A test run found that pending claims hold roster spots, so the code stopped calling a spot open while a claim was waiting on it. A review of the injury feature found that a minutes estimate of \"nan\" (not a number) slipped past every bound and made the move test pass. Minutes must now be a finite number, and the move test fails closed. Then a stale injury report woke the model for a player who had already played. Claude caught it from the news, but the day's spare wake was spent and later injuries couldn't get through, so now an injury wakes the model only if the fantasy game's own status also says out. The timing work got the heaviest scrutiny: a 56-agent adversarial review confirmed 44 findings and refuted 8, all fixed the same night, followed by later review rounds. One of those fixes cancels any pending claim whose drop I've since protected."
+      },
+      {
+        "heading": "Results so far, as of November 9, 2026",
+        "body": "After three completed matchups the team is first of 10 and 3-0, with a 17-9-1 record in category results (6-2-1, 5-4-0, 6-3-0). It has made 21 acquisitions, the most in the league, and the next highest is 16. Last season, managing by hand, I finished 9th with 7 adds. Since going live on October 17 it has logged 58 live ESPN transactions (20 free-agent adds, 10 waiver claims, 27 roster moves and 1 future-roster move), and its decision log holds 257 entries. I'm not claiming the agent earned that record. Three weeks is a small sample, and a better draft could explain some of it. What the numbers do show is the thing I set out to fix: the daily work is getting done."
+      },
+      {
+        "heading": "How I built it",
+        "body": "It's about 6,000 lines of Python, built with Claude Code, and I'm open about that. I set the rules and the design: what belongs to the model and what belongs to code, who can be dropped, what a move must clear, and when the watcher may wake the model. Claude Code did most of the implementation and ran the review passes. ESPN's fantasy endpoints are unofficial and undocumented, so I treated every untested call as unverified. There's no public code for this project, so this page is a write-up."
+      }
+    ],
+    "repo_url": null,
+    "demo_url": null,
+    "featured": true,
+    "created_at": "2026-11-09 12:00:00.000000"
+  },
+  {
     "title": "This Portfolio Site",
     "summary": "The site you're reading. I built it as a React and TypeScript site on Vercel, with Python serverless functions and Neon Postgres behind it, and a retrieval chatbot that answers from my written case studies. Project data is baked into the deployed bundle. The FastAPI backend in the repository is used for local development only.",
     "highlights": [
@@ -172,7 +239,7 @@
       "A FastAPI backend lives in the repository and is used for local development only"
     ],
     "video_url": null,
-    "sort_order": 3,
+    "sort_order": 4,
     "id": 4,
     "tagline": "The site you're reading: React and TypeScript on Vercel, Python serverless functions, Neon Postgres, and a retrieval chatbot over my written case studies.",
     "slug": "portfolio-site",
