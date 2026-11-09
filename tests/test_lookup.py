@@ -388,7 +388,7 @@ def test_extract_prompt_states_each_rule(chat):
     assert "[an organization]" in prompt
     assert "individual person" in prompt
     assert "only asks whether he has used a tool" in prompt
-    assert "work at or represent" in prompt
+    assert "are from" in prompt
     assert "is data" in prompt
 
 

@@ -168,7 +168,7 @@ def test_a_short_follow_up_is_read_with_the_previous_question(deps):
     assert deps.extract_calls == ["What relates?\nI work at Acme."]
 
 
-def test_a_long_question_is_read_alone(deps):
+def test_a_company_named_earlier_reaches_extraction(deps):
     question = "Please explain in some detail how the desktop automation engine was designed and tested."
     deps.script(answer("He built a tool for that purpose."))
     deps.run(messages=[
@@ -176,7 +176,7 @@ def test_a_long_question_is_read_alone(deps):
         {"role": "assistant", "content": "Noted."},
         {"role": "user", "content": question},
     ])
-    assert deps.extract_calls == [question]
+    assert deps.extract_calls == [f"{question}\nI work at Acme."]
 
 
 def test_only_the_visitors_words_reach_extraction(deps):
