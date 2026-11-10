@@ -35,6 +35,8 @@ FUNCTIONS = {
     "site.spend_open(int)": "site_search",
     "site.month_spend_open(int)": "site_search",
     "site.record_spend(int)": "site_search",
+    "site.reserve_spend(int, int, int)": "site_search",
+    "site.settle_spend(date, int, int)": "site_search",
     "site.take_log_slot(text, int)": "site_search",
     "site.take_event_slot(text, int, int)": "site_logger",
 }

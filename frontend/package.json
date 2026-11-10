@@ -13,7 +13,7 @@
     "@vercel/analytics": "^1.5.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "react-router-dom": "7.18.4"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",

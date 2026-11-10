@@ -27,11 +27,11 @@ export function classifySiteLink(url: string): SafeLink | null {
   return null
 }
 
-/** Web sources may point anywhere public, but only over http or https. */
+/** Web sources may point anywhere public, but only over https and with no username or password in the address. */
 export function webHref(url: string): string | null {
   try {
     const parsed = new URL(url.trim())
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null
+    return parsed.protocol === 'https:' && !parsed.username && !parsed.password ? parsed.href : null
   } catch {
     return null
   }

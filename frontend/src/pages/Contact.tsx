@@ -1,11 +1,13 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react'
-import { sendContact } from '../api'
+import { ContactError, sendContact } from '../api'
 import { SITE } from '../config'
 
 type Status = 'idle' | 'sending' | 'sent' | 'error'
 
+const EMPTY_FORM = { name: '', email: '', message: '', extra: '' }
+
 export default function Contact() {
-  const [form, setForm] = useState({ name: '', email: '', message: '' })
+  const [form, setForm] = useState(EMPTY_FORM)
   const [status, setStatus] = useState<Status>('idle')
   const [feedback, setFeedback] = useState('')
 
@@ -21,9 +23,10 @@ export default function Contact() {
       const res = await sendContact(form)
       setFeedback(res.message)
       setStatus('sent')
-      setForm({ name: '', email: '', message: '' })
-    } catch {
-      setFeedback('Something went wrong sending that. Email me directly?')
+      setForm(EMPTY_FORM)
+    } catch (error) {
+      const message = error instanceof ContactError ? error.message : ''
+      setFeedback(message || `Something went wrong sending that. Please email ${SITE.email} directly.`)
       setStatus('error')
     }
   }
@@ -43,9 +46,13 @@ export default function Contact() {
         <p className="mt-8 rounded-md border border-accent/40 bg-accent/5 px-4 py-3 text-fg">{feedback}</p>
       ) : (
         <form onSubmit={onSubmit} className="mt-8 space-y-4">
-          <input className={field} placeholder="Name" value={form.name} onChange={update('name')} required />
-          <input className={field} type="email" placeholder="Email" value={form.email} onChange={update('email')} required />
-          <textarea className={field} rows={5} placeholder="Message" value={form.message} onChange={update('message')} required />
+          <input className={field} placeholder="Name" value={form.name} onChange={update('name')} maxLength={200} required />
+          <input className={field} type="email" placeholder="Email" value={form.email} onChange={update('email')} maxLength={320} required />
+          <textarea className={field} rows={5} placeholder="Message" value={form.message} onChange={update('message')} maxLength={5000} required />
+          {/* Kept out of sight and out of the tab order, so a person never fills it in. */}
+          <div aria-hidden="true" className="absolute -left-[9999px] h-px w-px overflow-hidden">
+            <input name="extra" tabIndex={-1} autoComplete="off" value={form.extra} onChange={update('extra')} />
+          </div>
           <button
             type="submit"
             disabled={status === 'sending'}
@@ -53,7 +60,7 @@ export default function Contact() {
           >
             {status === 'sending' ? 'Sending…' : 'Send'}
           </button>
-          {status === 'error' && <p className="text-sm text-red-400">{feedback}</p>}
+          {status === 'error' && <p role="alert" className="text-sm text-red-400">{feedback}</p>}
         </form>
       )}
     </div>

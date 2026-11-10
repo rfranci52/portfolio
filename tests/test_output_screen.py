@@ -22,6 +22,57 @@ def drain(chat, chunks, kinds=None):
     return released + out, None, steps
 
 
+TAIL = " and more ordinary words that follow it here to run past the hold."
+
+
+@pytest.mark.parametrize("draft", [
+    "He worked at Zeph[yrion](x<y) Dynamics",
+    "He worked at [Zephyrion](x>y) Dynamics",
+    "He worked at [Zephyrion Dynamics](x<y)",
+    "He worked at **Zeph**[yrion](a<b) Dynamics",
+])
+@pytest.mark.parametrize("chunk_size", [1, 4, 500])
+def test_a_link_only_the_page_would_render_is_still_screened(chat, draft, chunk_size):
+    text = draft + TAIL
+    released, hit, _ = drain(chat, [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)])
+    assert isinstance(hit, chat.ScreenHit) and hit.kind == "name"
+    assert "Dynamics" not in released
+
+
+def test_a_malformed_link_on_an_ordinary_word_passes(chat):
+    text = "See the [notes](a<b) for how it was built" + TAIL
+    released, hit, _ = drain(chat, [text])
+    assert hit is None and released == text
+
+
+@pytest.mark.parametrize("control", ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"])
+def test_bidirectional_override_characters_never_reach_the_page(chat, control):
+    released, hit, _ = drain(chat, [f"He built {control}a desktop{control} engine for reports" + TAIL])
+    assert hit is None
+    assert control not in released
+    assert released == "He built a desktop engine for reports" + TAIL
+
+
+def test_a_bidirectional_override_split_across_deltas_is_removed(chat):
+    text = "He built a tool\u202e for reports" + TAIL
+    released, hit, _ = drain(chat, list(text))
+    assert hit is None and "\u202e" not in released
+
+
+def test_a_direction_mark_stays(chat):
+    released, hit, _ = drain(chat, ["He built it\u200e for reports" + TAIL])
+    assert hit is None and "\u200e" in released
+
+
+@pytest.mark.parametrize("text", [
+    "1. Z e p h y r i o n Dynamics",
+    "Z\ne\np\nh\ny\nr\ni\no\nn Dynamics",
+    "Z   e   p   h   y   r   i   o   n Dynamics",
+])
+def test_spelled_out_names_in_answers_are_caught_across_gaps(chat, text):
+    assert isinstance(drain(chat, [text + TAIL])[1], chat.ScreenHit)
+
+
 def test_clean_text_comes_through_exactly(chat):
     text = "He built a **desktop** engine.\n\n- First item\n- Second item, with a comma.\n"
     released, hit, _ = drain(chat, [text])

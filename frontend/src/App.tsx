@@ -9,6 +9,7 @@ import ProjectDetail from './pages/ProjectDetail'
 import HowThisWorks from './pages/HowThisWorks'
 import About from './pages/About'
 import Contact from './pages/Contact'
+import WhatIsSaved from './pages/WhatIsSaved'
 
 const navLink = ({ isActive }: { isActive: boolean }) =>
   `text-[13px] transition-colors hover:text-fg sm:text-sm ${isActive ? 'text-fg' : 'text-muted'}`
@@ -34,9 +35,9 @@ function Nav() {
 function Footer({ docked }: { docked: boolean }) {
   return (
     <footer className="mt-24 border-t border-border">
-      <div className={`mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 pt-8 text-sm text-muted ${docked ? 'pb-20' : 'pb-8'}`}>
+      <div className={`mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-6 pt-8 text-sm text-muted ${docked ? 'pb-20' : 'pb-8'}`}>
         <span>© {new Date().getFullYear()} {SITE.name}</span>
-        <div className="flex gap-5 font-mono">
+        <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono">
           {SITE.linkedin && (
             <a href={SITE.linkedin} target="_blank" rel="noreferrer" className="hover:text-fg">linkedin</a>
           )}
@@ -44,6 +45,7 @@ function Footer({ docked }: { docked: boolean }) {
             <a href={SITE.github} target="_blank" rel="noreferrer" className="hover:text-fg">github</a>
           )}
           <Link to="/contact" className="hover:text-fg">email</Link>
+          <Link to="/what-is-saved" className="hover:text-fg">what is saved</Link>
         </div>
       </div>
     </footer>
@@ -74,6 +76,7 @@ export default function App() {
           <Route path="/how-this-works" element={<HowThisWorks />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/what-is-saved" element={<WhatIsSaved />} />
         </Routes>
       </main>
       <Footer docked={!home} />

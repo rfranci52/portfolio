@@ -162,6 +162,42 @@ def test_a_one_letter_word_beside_a_spaced_out_name_does_not_hide_it(chat, text)
     assert chat.screen_input(text)["action"] == "mask", text
 
 
+@pytest.mark.parametrize("text", [
+    "Has he worked with Z\ne\np\nh\ny\nr\ni\no\nn Dynamics?",
+    "Has he worked with Z\r\ne\r\np\r\nh\r\ny\r\nr\r\ni\r\no\r\nn Dynamics?",
+    "Has he worked with Z  -  e  -  p  -  h  -  y  -  r  -  i  -  o  -  n Dynamics?",
+    "Has he worked with Z     e     p     h     y     r     i     o     n Dynamics?",
+    "1. Z e p h y r i o n Dynamics",
+    "7) Z e p h y r i o n D y n a m i c s 9",
+    "x Z e p h y r i o n D y n a m i c s",
+])
+def test_spelled_out_letters_are_read_across_lines_wider_gaps_and_list_markers(chat, text):
+    assert chat.screen_input(text)["action"] == "mask", text
+
+
+def test_letters_far_apart_are_not_read_as_one_word(chat):
+    spaced = (" " * (chat.MAX_SPACED_GAP + 1)).join("Zephyrion")
+    assert chat.screen_input(f"{spaced} Dynamics")["action"] == "pass"
+
+
+@pytest.mark.parametrize("text", [
+    "a b c d e", "Plan B is a C program", "x\ny\nz", "1. a\n2. b\n3. c",
+])
+def test_ordinary_single_letters_pass(chat, text):
+    assert chat.screen_input(text) == {"action": "pass", "text": text, "retrieval": text, "kinds": []}
+
+
+def test_a_block_tag_that_closes_up_after_removal_comes_out_too(chat):
+    result = chat.screen_input("< <public_information> public_information> What did he build?")
+    assert "public_information" not in result["text"]
+    assert result["text"].strip() == "What did he build?"
+
+
+def test_the_block_tag_filter_stops_after_a_few_passes(chat):
+    deep = "< " * 50 + "public_information> " * 50
+    assert chat._strip_block_tags(deep).count("public_information") == 50 - chat.TAG_PASSES
+
+
 def test_a_word_is_masked_at_its_original_position(chat):
     result = chat.screen_input("Before Zephyrion\u200b Dynamics after")
     assert result["text"] == "Before [an organization] after"

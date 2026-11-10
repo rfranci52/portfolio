@@ -229,8 +229,8 @@ REQUIRED_CHAT_ATTRIBUTES = (
     "lookup_org_db",
     "web_lookup",
     "take_quota_db",
-    "spend_open_db",
-    "record_spend_db",
+    "reserve_spend_db",
+    "settle_spend_db",
     "take_log_slot_db",
     "write_log",
     "load_screen",
@@ -838,8 +838,8 @@ def install_hooks(chat: Any) -> None:
 
     patch_function(chat, "take_quota_db", before=quota_hook)
     patch_function(chat, "take_log_slot_db", before=quota_hook)
-    patch_function(chat, "spend_open_db", before=quota_hook)
-    patch_function(chat, "record_spend_db", before=spend_record_hook)
+    patch_function(chat, "reserve_spend_db", before=quota_hook)
+    patch_function(chat, "settle_spend_db", before=spend_record_hook)
     patch_function(chat, "write_log", before=log_hook)
     patch_function(chat, "search_chunks", after=search_after)
     patch_function(chat, "lookup_org_db", before=org_hook, after=org_after)

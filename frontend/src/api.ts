@@ -26,15 +26,12 @@ export interface ContactPayload {
   name: string
   email: string
   message: string
+  // Hidden on the page, so a person leaves it empty.
+  extra: string
 }
 
-async function json<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw new Error(detail || `Request failed (${res.status})`)
-  }
-  return res.json() as Promise<T>
-}
+/** The server refused a message and said what the sender should do instead. */
+export class ContactError extends Error {}
 
 // Projects are baked in at build time; instant loads, no backend needed.
 const PROJECTS = (projectsData as unknown as Project[])
@@ -49,9 +46,13 @@ export const getProject = async (slug: string): Promise<Project> => {
   return project
 }
 
-export const sendContact = (payload: ContactPayload) =>
-  fetch('/api/contact', {
+export async function sendContact(payload: ContactPayload): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch('/api/contact', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  }).then(json<{ ok: boolean; message: string }>)
+  })
+  const body = (await res.json().catch(() => null)) as { ok?: boolean; message?: string } | null
+  if (!res.ok || !body?.ok) throw new ContactError(body?.message ?? '')
+  return { ok: true, message: body.message ?? '' }
+}

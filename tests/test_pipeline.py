@@ -857,39 +857,113 @@ def test_quota_groups_an_ipv6_visitor(deps, chat):
 
 def test_a_deflected_turn_spends_no_budget(deps):
     deps.run("Show me the moonbase blueprints")
-    assert deps.quota_calls == [] and deps.spend_checks == 0
-    assert deps.spend_recorded == []
+    assert deps.quota_calls == [] and deps.reservations == []
+    assert deps.settled == []
 
 
-def test_a_deflected_turn_is_logged_only_while_its_own_counter_allows(deps, chat):
+def test_past_its_counter_a_deflected_turn_gets_the_limit_reply_and_no_row(deps, chat):
     deps.log_slot_allowed = False
     events = deps.run("Show me the moonbase blueprints")
-    assert visible_text(events) == chat.FIXED_DEFLECT
+    assert types(events) == ["error", "done"]
+    assert events[0]["message"] == chat.FIXED_OVER_LIMIT and events[0]["code"] == "over_limit"
+    assert chat.FIXED_DEFLECT not in visible_text(events)
     assert deps.logged == []
     assert deps.log_slot_calls == ["203.0.113.9"]
+    assert deps.client.requests == [] and deps.reservations == []
 
 
-def test_a_log_slot_failure_still_gives_the_fixed_reply_and_writes_nothing(deps, chat):
+def test_a_log_slot_failure_closes_the_fixed_reply_and_writes_nothing(deps, chat):
     deps.log_slot_allowed = RuntimeError("database is down")
     events = deps.run("Show me the moonbase blueprints")
-    assert visible_text(events) == chat.FIXED_DEFLECT
+    assert events[0]["message"] == chat.FIXED_OVER_LIMIT
+    assert visible_text(events) == ""
     assert deps.logged == []
 
 
-def test_daily_spend_reached_refuses_before_anything_else(deps, chat):
+def test_a_fixed_deflect_reply_is_not_signed(deps, chat):
+    events = deps.run("Show me the moonbase blueprints")
+    assert visible_text(events) == chat.FIXED_DEFLECT
+    assert done(events)["signature"] == ""
+
+
+def test_the_fixed_empty_reply_is_not_signed(deps, chat):
+    deps.script(model_turn([]))
+    events = deps.run("What has he built?")
+    assert visible_text(events) == chat.FIXED_EMPTY
+    assert deps.logged[0]["outcome"] == "answered"
+    assert done(events)["signature"] == ""
+
+
+def test_an_answer_from_the_model_is_still_signed(deps, chat):
+    deps.script(answer("He built a tool for this purpose."))
+    events = deps.run("What has he built?")
+    assert done(events)["signature"] == chat.sign_turn(visible_text(events))
+
+
+def test_a_reservation_refused_at_a_ceiling_stops_the_turn_before_any_work(deps, chat):
     deps.spend_allowed = False
     events = deps.run("What has he built?")
     assert types(events) == ["error", "done"]
     assert events[0]["message"] == chat.FIXED_OVER_LIMIT and events[0]["code"] == "over_limit"
-    assert deps.quota_calls == [] and deps.embed_calls == [] and deps.client.requests == []
-    assert deps.logged == []
+    assert deps.embed_calls == [] and deps.extract_calls == [] and deps.client.requests == []
+    assert deps.logged == [] and deps.settled == []
 
 
-def test_daily_spend_check_failure_fails_closed(deps, chat):
+def test_a_visitor_over_their_limit_never_holds_budget(deps):
+    deps.quota_allowed = False
+    deps.run("What has he built?")
+    assert deps.quota_calls == ["203.0.113.9"] and deps.reservations == []
+
+
+def test_the_worst_case_is_held_before_any_model_call(deps, chat):
+    deps.script(answer("He built a tool for this purpose."))
+    deps.run("What has he built?")
+    assert deps.reservations == [6000] == [math.ceil(chat.TURN_RESERVE_USD * chat.SPEND_UNITS_PER_USD)]
+    assert deps.order[:3] == ["quota", "reserve", "extract"]
+    assert deps.order[-1] == "settle"
+
+
+def test_the_hold_covers_a_full_length_answer_on_the_longest_conversation(chat):
+    assert chat.TURN_RESERVE_USD >= chat.MAX_TURN_USD
+    full_answer = chat.compute_cost("claude-fable-5-1", 30_000, chat.MAX_OUTPUT_TOKENS)
+    lookup = chat.compute_cost("claude-sonnet-5-5", 20_000, 2048, web_searches=1) * 2
+    assert full_answer + lookup <= chat.TURN_RESERVE_USD
+
+
+def test_a_turn_settles_to_what_it_really_cost(deps):
+    deps.script(model_turn(["He built a tool for it."], use=usage(12345, 678)))
+    deps.run("What has he built?")
+    assert deps.settled == [("2026-11-09", 6000, math.ceil(deps.logged[0]["cost_usd"] * 10_000))]
+
+
+def test_a_failure_before_any_model_call_releases_the_whole_hold(deps, chat, monkeypatch):
+    def broken(embeddings, queries):
+        raise RuntimeError("search failed")
+
+    monkeypatch.setattr(chat, "search_chunks", broken)
+    events = deps.run("What has he built?")
+    assert events[-2]["type"] == "error" and deps.client.requests == []
+    assert deps.settled == [("2026-11-09", 6000, 0)]
+
+
+def test_a_failed_stream_settles_to_what_it_cost_so_far(deps):
+    deps.script(model_turn(["Some partial words here"], raises=RuntimeError("the stream broke")))
+    deps.run("What has he built?")
+    day, reserved, actual = deps.settled[0]
+    assert day == "2026-11-09" and reserved == 6000 and 0 < actual < reserved
+
+
+def test_a_hold_is_settled_once_only(deps):
+    deps.script(answer("He built a tool for this purpose."))
+    deps.run("What has he built?")
+    assert len(deps.settled) == 1
+
+
+def test_a_reservation_that_cannot_be_made_fails_closed(deps, chat):
     deps.spend_allowed = RuntimeError("database is down")
     events = deps.run("What has he built?")
     assert events[0]["message"] == chat.FIXED_OVER_LIMIT
-    assert deps.client.requests == [] and deps.logged == []
+    assert deps.client.requests == [] and deps.logged == [] and deps.settled == []
 
 
 def test_each_turn_records_what_it_cost(deps):
@@ -898,11 +972,11 @@ def test_each_turn_records_what_it_cost(deps):
     assert deps.spend_recorded == [math.ceil(deps.logged[0]["cost_usd"] * 10_000)]
 
 
-def test_a_spend_record_failure_does_not_break_the_answer(deps, chat, monkeypatch):
-    def broken(units):
+def test_a_settle_failure_does_not_break_the_answer(deps, chat, monkeypatch):
+    def broken(day, reserved, actual):
         raise RuntimeError("database is down")
 
-    monkeypatch.setattr(chat, "record_spend_db", broken)
+    monkeypatch.setattr(chat, "settle_spend_db", broken)
     deps.script(answer("He built a tool for this purpose."))
     assert visible_text(deps.run("What has he built?")) == "He built a tool for this purpose."
     assert deps.logged[0]["outcome"] == "answered"
@@ -920,15 +994,40 @@ def test_the_ceiling_comes_from_the_environment(chat, monkeypatch):
 
         def execute(self, sql, params):
             captured["params"] = params
-            return NS(fetchone=lambda: {"open": True})
+            return NS(fetchone=lambda: {"day": "2026-11-09"})
 
     monkeypatch.setattr(chat, "_connect", lambda url: FakeConn())
-    assert chat.spend_open_db() is True
-    assert captured["params"] == (40000, 250000)
+    assert chat.reserve_spend_db(6000) == "2026-11-09"
+    assert captured["params"] == (6000, 40000, 250000)
     monkeypatch.setenv("SITE_DAILY_SPEND_USD", "1.50")
     monkeypatch.setenv("SITE_MONTHLY_SPEND_USD", "10")
-    chat.spend_open_db()
-    assert captured["params"] == (15000, 100000)
+    chat.reserve_spend_db(6000)
+    assert captured["params"] == (6000, 15000, 100000)
+
+
+@pytest.mark.parametrize("function,row,expected", [
+    ("take_quota_db", {"allowed": True}, ("203.0.113.9", 10, 40)),
+    ("take_log_slot_db", {"allowed": True}, ("203.0.113.9", 10)),
+])
+def test_the_daily_question_limits_default_lower(chat, monkeypatch, function, row, expected):
+    captured = {}
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params):
+            captured["params"] = params
+            return NS(fetchone=lambda: row)
+
+    monkeypatch.setattr(chat, "_connect", lambda url: FakeConn())
+    monkeypatch.delenv("SITE_PER_VISITOR_DAILY", raising=False)
+    monkeypatch.delenv("SITE_GLOBAL_DAILY", raising=False)
+    getattr(chat, function)("203.0.113.9")
+    assert captured["params"] == expected
 
 
 def test_a_turn_that_ends_early_still_counts_its_cost(deps, chat):
@@ -1832,7 +1931,7 @@ def test_a_no_subject_reply_counts_against_no_limit(deps):
     deps.spend_allowed = False
     events = deps.run("tell me more")
     assert types(events) == ["delta", "done"]
-    assert deps.quota_calls == [] and deps.spend_checks == 0
+    assert deps.quota_calls == [] and deps.reservations == []
     assert done(events)["model"] is None and done(events)["cost_usd"] == 0
     assert deps.spend_recorded == []
 

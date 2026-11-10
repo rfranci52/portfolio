@@ -72,7 +72,8 @@ function SourceList({ sources, related }: { sources: Sources; related: RelatedLi
     if (!href) return []
     // Some pages have machine-generated titles, so fall back to the site's name.
     const readable = source.title && !/[0-9a-f]{16}/i.test(source.title)
-    return [{ title: readable ? source.title : new URL(href).hostname, href }]
+    const host = new URL(href).hostname
+    return [{ title: readable ? source.title : host, host, href }]
   })
   // Related entries repeat work sources when both come from the same passage.
   const workUrls = new Set(sources.work.map((source) => source.url))
@@ -97,6 +98,7 @@ function SourceList({ sources, related }: { sources: Sources; related: RelatedLi
           {webLinks.map((source, i) => (
             <li key={i} className="break-words">
               <a href={source.href} target="_blank" rel="noreferrer" className={sourceLink}>{source.title}</a>
+              {source.title !== source.host && <span className="ml-1.5 font-mono text-[11px]">{source.host}</span>}
             </li>
           ))}
         </SourceGroup>

@@ -133,7 +133,7 @@ def clean_data(kind, data):
 
 def build_row(data, headers):
     """The row to insert, or None when the event is not one this endpoint accepts."""
-    if not isinstance(data, dict) or data.get("kind") not in KINDS:
+    if not isinstance(data, dict) or not isinstance(data.get("kind"), str) or data["kind"] not in KINDS:
         return None
     ip = _short((headers.get("x-forwarded-for") or "").split(",")[0].strip(), 64) or None
     user_agent = _short(headers.get("user-agent") or "", 512) or None
@@ -195,7 +195,7 @@ class handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("content-length") or 0)
         except ValueError:
             return self._reply(400)
-        if length > MAX_BODY_BYTES:
+        if not 0 <= length <= MAX_BODY_BYTES:
             return self._reply(413)
         try:
             data = json.loads(self.rfile.read(length) or b"null")

@@ -161,6 +161,7 @@ MAX_LOOKUP_PAUSES = 3
 MAX_OUTPUT_TOKENS = 2000
 EXTRACT_MAX_TOKENS = 100
 MAX_TURN_USD = 0.40  # no further model call once a turn has cost this much
+TURN_RESERVE_USD = 0.60  # held before a turn starts: a full-length answer on the longest conversation, plus a lookup
 SPEND_UNITS_PER_USD = 10_000  # the daily spend counter holds hundredths of a cent
 THINKING_ALLOWANCE_TOKENS = 300  # stands in for thinking when an attempt ends before its usage report
 TURN_SECONDS = 48  # leaves room inside the 60 second limit for cold start and the log write
@@ -179,6 +180,13 @@ RELATED_TARGET = 3  # related links on a turn that named a company
 
 OVERLAP_WORDS = 8  # a run this long copied from the instructions counts as a leak
 NAME_OVERLAP_WORDS = 4  # the same for a lookup name, which is at most 6 words
+MAX_SPACED_GAP = 6  # the most characters between the letters of a word spelled out one at a time
+TAG_PASSES = 4  # taking out one typed block tag can close up another, so the filter repeats
+
+# Public forms of the site owner's name. A lookup never runs on one of them.
+OWNER_GIVEN_NAME = "rakim"
+OWNER_SURNAME = "francis"
+OWNER_HANDLE = "rfranci52"
 
 INPUT_KINDS = ("name", "deflect")
 OUTPUT_KINDS = ("name", "deflect", "say")
@@ -369,7 +377,7 @@ def take_quota_db(ip):
     with _connect(_env("SITE_SEARCH_URL")) as conn:
         row = conn.execute(
             "select site.take_quota(%s, %s, %s) as allowed",
-            (ip, _env_int("SITE_PER_VISITOR_DAILY", 15), _env_int("SITE_GLOBAL_DAILY", 75)),
+            (ip, _env_int("SITE_PER_VISITOR_DAILY", 10), _env_int("SITE_GLOBAL_DAILY", 40)),
         ).fetchone()
     return bool(row["allowed"])
 
@@ -379,25 +387,27 @@ def take_log_slot_db(ip):
     with _connect(_env("SITE_SEARCH_URL")) as conn:
         row = conn.execute(
             "select site.take_log_slot(%s, %s) as allowed",
-            (ip, _env_int("SITE_PER_VISITOR_DAILY", 15)),
+            (ip, _env_int("SITE_PER_VISITOR_DAILY", 10)),
         ).fetchone()
     return bool(row["allowed"])
 
 
-def spend_open_db():
-    """True while recorded model spend is under both the daily and monthly ceilings."""
+def reserve_spend_db(units):
+    """Holds a turn's worst-case cost against the daily and monthly ceilings in one atomic step.
+
+    Returns the day the hold was counted on, or None when either ceiling would be passed.
+    """
     day = math.floor(_env_float("SITE_DAILY_SPEND_USD", 4.00) * SPEND_UNITS_PER_USD)
     month = math.floor(_env_float("SITE_MONTHLY_SPEND_USD", 25.00) * SPEND_UNITS_PER_USD)
     with _connect(_env("SITE_SEARCH_URL")) as conn:
-        row = conn.execute(
-            "select site.spend_open(%s) and site.month_spend_open(%s) as open", (day, month)
-        ).fetchone()
-    return bool(row["open"])
+        row = conn.execute("select site.reserve_spend(%s, %s, %s) as day", (units, day, month)).fetchone()
+    return row["day"]
 
 
-def record_spend_db(units):
+def settle_spend_db(day, reserved, actual):
+    """Swaps a hold for what the turn really cost. A turn that spent nothing releases all of it."""
     with _connect(_env("SITE_SEARCH_URL")) as conn:
-        conn.execute("select site.record_spend(%s)", (units,))
+        conn.execute("select site.settle_spend(%s, %s, %s)", (day, reserved, actual))
 
 
 def lookup_org_db(hashes):
@@ -621,9 +631,6 @@ def _tokens_from(reading, offsets, text):
     return tokens
 
 
-_ONE_LETTER_WORDS = {"a", "i"}  # beside a spaced-out word these may be words of their own
-
-
 def _spaced_runs(tokens, text):
     """(first, last) token indexes of each run of three or more spaced single letters."""
     runs = []
@@ -634,8 +641,7 @@ def _spaced_runs(tokens, text):
             stop + 1 < len(tokens)
             and len(tokens[stop][0]) == 1
             and len(tokens[stop + 1][0]) == 1
-            and len(gap := text[tokens[stop][3]:tokens[stop + 1][2]]) <= 2
-            and "\n" not in gap
+            and tokens[stop + 1][2] - tokens[stop][3] <= MAX_SPACED_GAP
         ):
             stop += 1
         if stop - index >= 2:
@@ -647,12 +653,12 @@ def _spaced_runs(tokens, text):
 
 
 def _join_runs(tokens, text, runs, trim_first, trim_last):
-    """The tokens with each run joined, optionally leaving a one-letter word at either end of it."""
+    """The tokens with each run joined, optionally leaving out the single character at either end of it."""
     joined = []
     cursor = 0
     for start, stop in runs:
-        first = start + 1 if trim_first and tokens[start][0] in _ONE_LETTER_WORDS else start
-        last = stop - 1 if trim_last and tokens[stop][0] in _ONE_LETTER_WORDS else stop
+        first = start + 1 if trim_first else start
+        last = stop - 1 if trim_last else stop
         joined.extend(tokens[cursor:first])
         joined.append((
             "".join(token[0] for token in tokens[first:last + 1]),
@@ -670,7 +676,8 @@ def _joined_views(tokens, text):
     """The tokens with spaced-out letters joined, once per way of reading the ends of a run.
 
     "a Z e p" may be the word "a" and then a spaced-out word, or one spaced-out word
-    that starts with a, so both are checked. Empty when the text has no such run.
+    that starts with a, and "1 Z e p" may be a list number in front of one, so each way
+    of reading the ends is checked. Empty when the text has no such run.
     """
     runs = _spaced_runs(tokens, text)
     if not runs:
@@ -782,9 +789,22 @@ def _trips_screen(text):
 
 
 _TYPED_MASK = re.compile(r"[\[\uff3b]\s*an\s+organization\s*[\]\uff3d]", re.IGNORECASE)
-# Only this server writes the block that carries public information, so visitors cannot forge one.
+# Typed copies of the tag on the block that carries public information come out, so a
+# visitor cannot casually pose as that block. This is a best effort: an unusual spelling
+# can still pass as plain text. It stays inside the visitor's own message, which the
+# instructions treat as data, and it can only affect that visitor's own session.
 _TYPED_BLOCK_TAG = re.compile(r"[<\uff1c]\s*/?\s*public[\s_\-]*information\b(?:[^>\uff1e\n]{0,40}[>\uff1e])?", re.IGNORECASE)
 _FALLBACK_DECOY = "Harrowgate Systems Group"
+
+
+def _strip_block_tags(text):
+    """Text with typed block tags removed, repeated because one removal can complete another tag."""
+    for _ in range(TAG_PASSES):
+        stripped = _TYPED_BLOCK_TAG.sub(" ", text)
+        if stripped == text:
+            break
+        text = stripped
+    return text
 
 
 def _decoy_for(span):
@@ -803,7 +823,7 @@ def screen_input(text):
 
     "text" is what the model may see. "retrieval" is the same text for the search step.
     """
-    text = _TYPED_BLOCK_TAG.sub(" ", _TYPED_MASK.sub("an organization", text))
+    text = _strip_block_tags(_TYPED_MASK.sub("an organization", text))
     hits = _find_hits(text, INPUT_KINDS)
     kinds = sorted({kind for _, _, kind in hits})
     merged = []
@@ -837,6 +857,10 @@ _BARE_URL = re.compile(
     r"[ \t]*(?:https?://|(?<![\w/.\-@])www\.|/{0,2}(?<![\w.\-])[\w.\-]+\.(?:vercel\.app|tmp\.now)\b)[^\s<>\[\]]*",
     re.IGNORECASE,
 )
+# The link pattern the page renders with, in SafeMarkdown.tsx. It takes a few shapes _MD_LINK does not.
+_PAGE_LINK = re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)\)")
+# Formatting controls that reorder how text displays. Marks that only nudge punctuation stay.
+_BIDI_CONTROLS = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
 
 
 def _replace_dashes(text):
@@ -882,13 +906,13 @@ def _strip_links(text):
     return _BARE_URL.sub(bare, _MD_LINK.sub(markdown, text)).replace("<>", "")
 
 
-def _display_map(text):
+def _display_map(text, links=_MD_LINK):
     """The text as it renders, link targets gone and bold markers joined up, plus each
     rendered character's index in the original text."""
     chars = []
     offsets = []
     cursor = 0
-    for link in list(_MD_LINK.finditer(text)) + [None]:
+    for link in list(links.finditer(text)) + [None]:
         stop = link.start() if link else len(text)
         chars.extend(text[cursor:stop])
         offsets.extend(range(cursor, stop))
@@ -909,10 +933,6 @@ def _display_map(text):
     return "".join(rendered), kept
 
 
-def _display_text(text):
-    return _display_map(text)[0]
-
-
 def _complete_length(text):
     """How much of the text ends on a finished word. A word touching the end may still grow."""
     end = len(text)
@@ -927,17 +947,17 @@ def _complete_length(text):
 
 def _hold_point(text, count):
     """Where released text must stop so `count` tokens stay back in every reading of it."""
-    display, offsets = _display_map(text)
     cut = len(text)
-    for view, mapping in ((text, None), (display, offsets)):
+    for view, mapping in ((text, None), _display_map(text), _display_map(text, _PAGE_LINK)):
         for tokens in _token_views(view):
             if len(tokens) < count:
                 return 0
             start = tokens[-count][2]
             cut = min(cut, mapping[start] if mapping is not None else start)
-    for link in _MD_LINK.finditer(text):
-        if link.start() < cut < link.end():
-            return link.start()
+    for links in (_MD_LINK, _PAGE_LINK):
+        for link in links.finditer(text):
+            if link.start() < cut < link.end():
+                return link.start()
     return cut
 
 
@@ -1072,19 +1092,20 @@ class OutputScreen:
         self._pending, self._clean, self._released = point
 
     def _take(self, segment):
+        segment = _BIDI_CONTROLS.sub("", segment)
         self._clean += _TYPED_MASK.sub(MASK_IN_ANSWERS, _strip_links(_replace_dashes(segment)))
 
     def _check(self, text):
-        rendered = _display_text(text)
-        for view in (text, rendered):
+        shown = list(dict.fromkeys(_display_map(text, links)[0] for links in (_MD_LINK, _PAGE_LINK)))
+        for view in dict.fromkeys([text, *shown]):
             hits = [
                 hit for hit in _find_hits(view, self._kinds, visitor_words=self._visitor_words)
                 if not _addresses_visitor(view, hit)
             ]
             if hits:
                 return ScreenHit(hits[0][2])
-        copied = _copied_run(rendered, _prompt_shingles(OVERLAP_WORDS, private_only=True))
-        return ScreenHit("overlap") if copied else None
+        runs = _prompt_shingles(OVERLAP_WORDS, private_only=True)
+        return ScreenHit("overlap") if any(_copied_run(view, runs) for view in shown) else None
 
     def _advance(self, final):
         text = self._clean
@@ -1313,6 +1334,22 @@ def _names_deployment(name):
     return any(f" {suffix.replace('.', ' ')} " in spaced for suffix in DEPLOYMENT_SUFFIXES)
 
 
+def _names_owner(name):
+    """Whether a lookup name is a form of the site owner's own name, in any reading of it.
+
+    The surname with the given name or its initial, the given name with the surname's
+    initial, or the handle is the owner however it is punctuated. Either name alone is
+    not, because each is also part of other names.
+    """
+    given, surname = OWNER_GIVEN_NAME, OWNER_SURNAME
+    joined = {OWNER_HANDLE, OWNER_HANDLE.rstrip("0123456789"), given + surname, given[0] + surname, given + surname[0]}
+    for tokens in _token_views(name):
+        words = {token[0] for token in tokens}
+        if words & joined or (surname in words and words & {given, given[0]}) or (given in words and surname[0] in words):
+            return True
+    return False
+
+
 def check_lookup(subject):
     """Validate one lookup subject. Returns (kind, name), or None when it is rejected."""
     if not isinstance(subject, dict):
@@ -1326,7 +1363,7 @@ def check_lookup(subject):
         return None
     if _TYPED_MASK.search(name) or normalize(name) == normalize(MASK) or _copies_instructions(name):
         return None
-    if _names_deployment(name):
+    if _names_deployment(name) or _names_owner(name):
         return None
     return None if _find_hits(name, ALL_KINDS, ignore_guard=True) else (kind, name)
 
@@ -1503,6 +1540,8 @@ class Turn:
         self.flags = []
         self.persisted = False
         self.log_allowed = False  # set once the turn has been counted against a daily limit
+        self.reserved_day = None  # the day this turn's budget hold was counted on
+        self.reserved_units = 0
 
     def elapsed_ms(self):
         return int((time.monotonic() - self.started) * 1000)
@@ -1632,10 +1671,13 @@ class Turn:
         return related[:4]
 
     def done_event(self):
-        """Cost and time are rounded, because exact figures would describe the hidden steps."""
+        """Cost and time are rounded, because exact figures would describe the hidden steps.
+
+        Only an answer the model wrote is signed, so a fixed reply never comes back as context.
+        """
         answered = self.outcome == "answered"
         signature = ""
-        if answered or self.outcome == "deflected":
+        if answered and "empty_answer" not in self.flags:
             try:
                 signature = sign_turn("".join(self.answer))
             except RuntimeError:
@@ -1687,9 +1729,10 @@ class Turn:
         }
 
     async def persist(self):
-        """Record what the turn spent, then write its log row, once.
+        """Settle the turn's budget hold to what it spent, then write its log row, once.
 
-        A failure here never reaches the visitor. A turn that was never counted against
+        A failure here never reaches the visitor, and a hold that cannot be settled stays
+        counted, which errs toward closing early. A turn that was never counted against
         a daily limit leaves no row, so this endpoint cannot be used to fill the table.
         """
         if self.persisted:
@@ -1697,11 +1740,11 @@ class Turn:
         self.persisted = True
         if self.client_left():
             self.flags.append("client_gone")
-        if self.cost > 0:
+        if self.reserved_units:
             try:
-                await _call(record_spend_db, math.ceil(self.cost * SPEND_UNITS_PER_USD))
+                await _call(settle_spend_db, self.reserved_day, self.reserved_units, math.ceil(self.cost * SPEND_UNITS_PER_USD))
             except Exception as exc:
-                print("chat: spend record failed:", type(exc).__name__)
+                print("chat: spend settle failed:", type(exc).__name__)
         if not self.log_allowed:
             return
         row = self.log_row()
@@ -2046,18 +2089,28 @@ async def _stream_answer(question, earlier, turn, addendum, public_info):
 
 
 async def _may_reach_model(turn):
-    """Whether today's limits allow a model turn. Failing to check counts as no."""
+    """Whether today's limits allow a model turn. Failing to check counts as no.
+
+    The visitor's count comes first, so a visitor over their limit never holds budget
+    that someone else could have used. The hold then covers the turn's worst case
+    before any model call, so turns running at once cannot pass a ceiling together.
+    """
+    units = math.ceil(TURN_RESERVE_USD * SPEND_UNITS_PER_USD)
     try:
-        if not await _call(spend_open_db):
+        if not await _call(take_quota_db, quota_key(turn.req.get("ip") or "unknown")):
             return False
-        return bool(await _call(take_quota_db, quota_key(turn.req.get("ip") or "unknown")))
+        day = await _call(reserve_spend_db, units)
     except Exception as exc:
         print("chat: limit check failed:", type(exc).__name__)
         return False
+    if day is None:
+        return False
+    turn.reserved_day, turn.reserved_units = day, units
+    return True
 
 
 async def _may_log_fixed_reply(turn):
-    """A fixed reply spends no daily budget, but its log rows are still limited per visitor."""
+    """A fixed reply spends no daily budget, but it and its log rows are still limited per visitor."""
     try:
         return bool(await _call(take_log_slot_db, quota_key(turn.req.get("ip") or "unknown")))
     except Exception as exc:
@@ -2130,9 +2183,13 @@ async def _pipeline(req, turn):
     if "name" in screened["kinds"]:
         turn.flags.append("input_name")
     if screened["action"] == "deflect":
-        turn.outcome = "deflected"
         turn.flags.append("input_deflect")
         turn.log_allowed = await _may_log_fixed_reply(turn)
+        if not turn.log_allowed:  # past the visitor's count, the fixed reply stops being available
+            turn.outcome = "over_quota"
+            yield {"type": "error", "message": FIXED_OVER_LIMIT, "code": "over_limit"}
+            return
+        turn.outcome = "deflected"
         yield turn.delta(FIXED_DEFLECT)
         return
 

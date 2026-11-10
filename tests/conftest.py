@@ -187,8 +187,10 @@ class Deps:
         self.lookup_calls = []
         self.quota_calls = []
         self.log_slot_calls = []
-        self.spend_recorded = []
-        self.spend_checks = 0
+        self.reservations = []  # worst-case units each turn asked to hold
+        self.settled = []  # (day, reserved, actual) for each hold given back
+        self.spend_recorded = []  # the real cost of each turn that spent anything
+        self.order = []  # the budget and model steps in the order they ran
         self.logged = []
         self.passages = list(PASSAGES)
         self.org_rows = []
@@ -206,8 +208,8 @@ class Deps:
             "web_lookup": self._lookup,
             "take_quota_db": self._quota,
             "take_log_slot_db": self._log_slot,
-            "spend_open_db": self._spend_open,
-            "record_spend_db": self.spend_recorded.append,
+            "reserve_spend_db": self._reserve,
+            "settle_spend_db": self._settle,
             "write_log": self.logged.append,
         }.items():
             monkeypatch.setattr(chat, name, replacement)
@@ -217,6 +219,7 @@ class Deps:
         self.monkeypatch.setattr(self.chat, "extract_subject", self.real_extract)
 
     def _extract(self, text):
+        self.order.append("extract")
         self.extract_calls.append(text)
         if isinstance(self.subject, Exception):
             raise self.subject
@@ -247,6 +250,7 @@ class Deps:
         return self.lookup_result
 
     def _quota(self, ip):
+        self.order.append("quota")
         self.quota_calls.append(ip)
         if isinstance(self.quota_allowed, Exception):
             raise self.quota_allowed
@@ -258,11 +262,18 @@ class Deps:
             raise self.log_slot_allowed
         return self.log_slot_allowed
 
-    def _spend_open(self):
-        self.spend_checks += 1
+    def _reserve(self, units):
+        self.order.append("reserve")
+        self.reservations.append(units)
         if isinstance(self.spend_allowed, Exception):
             raise self.spend_allowed
-        return self.spend_allowed
+        return "2026-11-09" if self.spend_allowed else None
+
+    def _settle(self, day, reserved, actual):
+        self.order.append("settle")
+        self.settled.append((day, reserved, actual))
+        if actual:
+            self.spend_recorded.append(actual)
 
     def script(self, *turns):
         self.client.turns = list(turns)

@@ -49,6 +49,27 @@ def test_a_rejected_name_looks_exactly_like_finding_nothing(deps, subject):
     assert {"type": "status", "stage": "looking_up"} in events
 
 
+@pytest.mark.parametrize("kind", ["company", "technology", "industry"])
+@pytest.mark.parametrize("name", [
+    "R. Francis", "R Francis", "r francis consulting", "Francis, R.", "R. J. Francis", "r.francis", "r_francis", "r-francis",
+    "rfrancis", "RFRANCIS", "rfranci52", "RFRANCI52", "rfranci", "rfranci52 llc", "Rakim F.", "rakim f", "rakimf",
+    "Rakim Francis", "RakimFrancis", "Rakim Francis Labs", "R. Fr\u0430ncis", "R. Fr4ncis", "r f r a n c i s", "R.\u200bFrancis",
+])
+def test_forms_of_the_owners_own_name_never_run_a_lookup(deps, chat, kind, name):
+    assert chat.check_lookup({"kind": kind, "name": name}) is None
+    lookup_then_answer(deps, kind=kind, name=name)
+    deps.run("What relates?")
+    assert deps.lookup_calls == []
+    assert payload(deps) == EMPTY
+
+
+@pytest.mark.parametrize("name", [
+    "Francis Group", "St. Francis Hospital", "Francis Harbor Foundation", "Rakim Records", "R Systems", "F5 Networks", "Acme",
+])
+def test_names_that_only_share_part_of_the_owners_still_look_up(chat, name):
+    assert chat.check_lookup({"kind": "company", "name": name}) == ("company", name)
+
+
 @pytest.mark.parametrize("subject", [
     {"kind": "planet", "name": "Mars"},
     {"kind": "company", "name": 42},

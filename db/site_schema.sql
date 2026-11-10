@@ -231,6 +231,64 @@ as $$
   on conflict (day, key) do update set n = q.n + greatest(record_spend.units, 0)
 $$;
 
+-- Holds a turn's worst-case cost before any model call, against both the daily
+-- and the monthly ceiling, in hundredths of a cent. Returns the day the hold was
+-- counted on, or null when either ceiling would be passed. Callers must treat a
+-- database error as a refusal.
+create or replace function site.reserve_spend(units int, day_limit int, month_limit int)
+returns date
+language plpgsql
+security definer
+set search_path = site, public, pg_temp
+as $$
+declare
+  today   date := (now() at time zone 'utc')::date;
+  day_n   int;
+  month_n bigint;
+begin
+  if units <= 0 or day_limit <= 0 or month_limit <= 0 then
+    return null;
+  end if;
+
+  -- Writing today's row locks it, so holds run one at a time and each one
+  -- reads what the one before it added.
+  insert into site.quota as q (day, key, n)
+  values (today, 'spend', 0)
+  on conflict (day, key) do update set n = q.n
+  returning q.n into day_n;
+
+  select coalesce(sum(q.n), 0) into month_n
+  from site.quota q
+  where q.key = 'spend'
+    and q.day >= date_trunc('month', today)::date;
+
+  if day_n + units > day_limit or month_n + units > month_limit then
+    return null;
+  end if;
+
+  update site.quota as q set n = q.n + units
+  where q.day = today and q.key = 'spend';
+
+  return today;
+end;
+$$;
+
+-- Swaps a hold for what the turn really cost, on the day the hold was counted.
+-- A turn that spent nothing passes zero and gives the whole hold back. A request
+-- ends well inside a minute, so a hold is never older than yesterday's.
+create or replace function site.settle_spend(reserved_on date, reserved int, actual int)
+returns void
+language sql
+security definer
+set search_path = site, public, pg_temp
+as $$
+  update site.quota as q
+  set n = greatest(q.n + greatest(settle_spend.actual, 0) - greatest(settle_spend.reserved, 0), 0)
+  where q.key = 'spend'
+    and q.day = settle_spend.reserved_on
+    and q.day >= (now() at time zone 'utc')::date - 1
+$$;
+
 -- A turn that never reaches the model spends no budget, but its log rows are
 -- limited per visitor all the same, on a counter of their own.
 create or replace function site.take_log_slot(visitor text, per_visitor int)
@@ -357,6 +415,8 @@ revoke execute on function site.web_cache_put(text, text, text, text, jsonb) fro
 revoke execute on function site.spend_open(int) from public;
 revoke execute on function site.month_spend_open(int) from public;
 revoke execute on function site.record_spend(int) from public;
+revoke execute on function site.reserve_spend(int, int, int) from public;
+revoke execute on function site.settle_spend(date, int, int) from public;
 revoke execute on function site.take_log_slot(text, int) from public;
 revoke execute on function site.take_event_slot(text, int, int) from public;
 
@@ -388,6 +448,8 @@ grant execute on function site.web_cache_put(text, text, text, text, jsonb) to s
 grant execute on function site.spend_open(int) to site_search;
 grant execute on function site.month_spend_open(int) to site_search;
 grant execute on function site.record_spend(int) to site_search;
+grant execute on function site.reserve_spend(int, int, int) to site_search;
+grant execute on function site.settle_spend(date, int, int) to site_search;
 grant execute on function site.take_log_slot(text, int) to site_search;
 
 grant insert on site.chat_log, site.events to site_logger;

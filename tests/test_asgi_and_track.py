@@ -312,6 +312,12 @@ def test_track_rejects_an_unknown_kind(dev_api, track):
     assert track.written == []
 
 
+@pytest.mark.parametrize("kind", [[], {}, ["pageview"], 5, None, True])
+def test_track_rejects_a_kind_that_is_not_a_string(dev_api, track, kind):
+    assert post_track(dev_api, track, event(kind=kind))[0] == 400
+    assert track.written == []
+
+
 def test_track_rejects_a_body_over_four_kilobytes(dev_api, track):
     assert post_track(dev_api, track, event(data={"x": "y" * 5000}))[0] == 413
     assert track.written == []
@@ -478,10 +484,36 @@ def test_each_function_is_granted_to_its_one_role(site_setup):
 
 def test_new_functions_are_definers_with_a_fixed_search_path():
     schema = schema_text()
-    for name in ("spend_open", "month_spend_open", "record_spend", "take_log_slot", "take_event_slot"):
+    for name in ("spend_open", "month_spend_open", "record_spend", "reserve_spend", "settle_spend", "take_log_slot", "take_event_slot"):
         body = schema[schema.index(f"create or replace function site.{name}("):]
         body = body[:body.index("$$;")]
         assert "security definer" in body and "set search_path = site, public, pg_temp" in body, name
+
+
+def function_body(name):
+    schema = schema_text()
+    body = schema[schema.index(f"create or replace function site.{name}("):]
+    return body[:body.index("$$;")]
+
+
+def test_the_reservation_is_one_atomic_step_against_both_ceilings():
+    body = function_body("reserve_spend")
+    assert "returns date" in body
+    assert "day_n + units > day_limit or month_n + units > month_limit" in body
+    assert body.index("on conflict (day, key) do update set n = q.n") < body.index("sum(q.n)") < body.index("set n = q.n + units")
+    assert "date_trunc('month', today)" in body
+
+
+def test_settling_can_give_back_but_is_limited_to_a_recent_hold():
+    body = function_body("settle_spend")
+    assert "settle_spend.actual" in body and "settle_spend.reserved" in body
+    assert "q.day = settle_spend.reserved_on" in body
+    assert "- 1" in body and "greatest(q.n +" in body
+
+
+@pytest.mark.parametrize("function", ["site.reserve_spend(int, int, int)", "site.settle_spend(date, int, int)"])
+def test_the_verifier_covers_the_reservation_functions(site_setup, function):
+    assert site_setup.FUNCTIONS[function] == "site_search"
 
 
 def test_the_verifier_flags_a_wrong_role(site_setup):
