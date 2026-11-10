@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { getProjects, type Project } from '../api'
 import ProjectCard from '../components/ProjectCard'
+import { pageTitle, useDocumentTitle } from '../title'
 
 export default function Projects() {
+  useDocumentTitle(pageTitle('Projects'))
   const [projects, setProjects] = useState<Project[]>([])
   const [error, setError] = useState('')
   useEffect(() => {

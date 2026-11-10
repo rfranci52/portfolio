@@ -1,5 +1,6 @@
 import { readEvalResults, type EvalResults } from '../chat/evalSummary'
 import rawSummary from '../eval_summary.json'
+import { pageTitle, useDocumentTitle } from '../title'
 
 const PIPELINE = [
   {
@@ -96,6 +97,7 @@ function EvalNumbers({ results }: { results: EvalResults }) {
 }
 
 export default function HowThisWorks() {
+  useDocumentTitle(pageTitle('How this works'))
   const results = readEvalResults(rawSummary)
 
   return (
@@ -144,7 +146,7 @@ export default function HowThisWorks() {
           <EvalNumbers results={results} />
         ) : (
           <p className="mt-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg">
-            The test cases and their results are kept private, so this page shows no numbers.
+            The test cases stay private so they can't be tuned against in public.
           </p>
         )}
       </section>

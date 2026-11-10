@@ -1,8 +1,10 @@
 """Checks on the deployed page: its response headers, pinned dependencies and a few page rules."""
+import ast
 import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 
 import pytest
@@ -167,3 +169,58 @@ def test_web_source_links_must_be_plain_https(url, expected):
     result = subprocess.run([NODE, "--no-warnings", "--input-type=module", "-e", code], capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == expected
+
+
+def test_the_sitemap_lists_every_page_and_project():
+    sitemap = (FRONTEND / "public" / "sitemap.xml").read_text(encoding="utf-8")
+    listed = re.findall(r"<loc>https://www\.rakimfrancis\.com(/[^<]*)</loc>", sitemap)
+    routes = set(re.findall(r'<Route path="(/[^"]*)"', page("App.tsx")))
+    pages = {route for route in routes if ":" not in route and route != "/about"}  # /about only redirects home
+    projects = json.loads((SRC / "projects.json").read_text(encoding="utf-8"))
+    assert len(listed) == len(set(listed))
+    assert set(listed) == pages | {f"/projects/{project['slug']}" for project in projects}
+    assert "Sitemap: https://www.rakimfrancis.com/sitemap.xml" in (FRONTEND / "public" / "robots.txt").read_text(encoding="utf-8")
+
+
+def test_an_unknown_address_gets_the_not_found_page():
+    assert '<Route path="*" element={<NotFound />} />' in page("App.tsx")
+    assert "if (error) return <NotFound />" in page("pages/ProjectDetail.tsx")
+    text = page("pages/NotFound.tsx")
+    assert "Page not found" in text and "That address isn't on this site." in text
+    assert 'to="/"' in text and 'to="/projects"' in text
+
+
+def test_link_previews_have_an_image_and_the_canonical_address():
+    index = (FRONTEND / "index.html").read_text(encoding="utf-8")
+    for tag in (
+        '<link rel="canonical" href="https://www.rakimfrancis.com/" />',
+        '<meta property="og:url" content="https://www.rakimfrancis.com/" />',
+        '<meta property="og:image" content="https://www.rakimfrancis.com/og-image.png" />',
+        '<meta name="twitter:card" content="summary_large_image" />',
+    ):
+        assert tag in index
+    png = (FRONTEND / "public" / "og-image.png").read_bytes()
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert struct.unpack(">II", png[16:24]) == (1200, 627)
+
+
+def seed_projects():
+    """The Project(...) rows in backend/app/seed.py, read without importing it."""
+    tree = ast.parse((ROOT / "backend" / "app" / "seed.py").read_text(encoding="utf-8"))
+    rows = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "Project":
+            row = {keyword.arg: ast.literal_eval(keyword.value) for keyword in node.keywords}
+            rows[row["slug"]] = row
+    return rows
+
+
+def test_the_baked_projects_match_the_seed():
+    # dump_projects.py rebuilds projects.json from seed.py, so the two must not drift apart.
+    seed = seed_projects()
+    baked = {project["slug"]: project for project in json.loads((SRC / "projects.json").read_text(encoding="utf-8"))}
+    assert set(seed) == set(baked)
+    defaults = {"repo_url": None, "demo_url": None, "video_url": None, "featured": False, "sort_order": 0}
+    for slug, row in seed.items():
+        for field in ("title", "tagline", "summary", "tech", "highlights", "sections", *defaults):
+            assert row.get(field, defaults.get(field)) == baked[slug][field], (slug, field)

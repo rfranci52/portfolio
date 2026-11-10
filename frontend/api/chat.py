@@ -39,6 +39,13 @@ FIXED_OVER_LIMIT = (
     "This assistant has reached its daily limit. Please come back tomorrow, or use "
     "the contact page to reach Rakim directly."
 )
+# Only where the count that ran out is known to be this visitor's own. The question
+# quota answers one yes or no for the visitor and the site together, so a refusal
+# there keeps the general message above.
+FIXED_VISITOR_LIMIT = (
+    "You've used today's questions for this chat. Please come back tomorrow, or use "
+    "the contact page to reach Rakim directly."
+)
 FIXED_ERROR = "Something went wrong on my side. Please try again in a moment."
 FIXED_INVALID = "Please type a question and try again."
 FIXED_EMPTY = "I couldn't put an answer together for that. Try asking about one of his projects."
@@ -1009,8 +1016,8 @@ def _prompt_shingles(size, private_only=False):
         for source in sources:
             found |= _shingles(source, size)
         for shown in (
-            FIXED_DEFLECT, FIXED_SAFE, FIXED_OVER_LIMIT, FIXED_ERROR, FIXED_INVALID, FIXED_EMPTY,
-            FIXED_DECLINE_REPEAT, FIXED_NO_SUBJECT,
+            FIXED_DEFLECT, FIXED_SAFE, FIXED_OVER_LIMIT, FIXED_VISITOR_LIMIT, FIXED_ERROR, FIXED_INVALID,
+            FIXED_EMPTY, FIXED_DECLINE_REPEAT, FIXED_NO_SUBJECT,
         ):
             found -= _shingles(shown, size)
         cache[key] = found
@@ -2110,12 +2117,15 @@ async def _may_reach_model(turn):
 
 
 async def _may_log_fixed_reply(turn):
-    """A fixed reply spends no daily budget, but it and its log rows are still limited per visitor."""
+    """A fixed reply spends no daily budget, but it and its log rows are still limited per visitor.
+
+    True when allowed, False when this visitor has used today's count, None when the check failed.
+    """
     try:
         return bool(await _call(take_log_slot_db, quota_key(turn.req.get("ip") or "unknown")))
     except Exception as exc:
         print("chat: log slot check failed:", type(exc).__name__)
-        return False
+        return None
 
 
 async def _retrieve(queries, turn, cited=()):
@@ -2184,10 +2194,13 @@ async def _pipeline(req, turn):
         turn.flags.append("input_name")
     if screened["action"] == "deflect":
         turn.flags.append("input_deflect")
-        turn.log_allowed = await _may_log_fixed_reply(turn)
+        slot = await _may_log_fixed_reply(turn)
+        turn.log_allowed = bool(slot)
         if not turn.log_allowed:  # past the visitor's count, the fixed reply stops being available
             turn.outcome = "over_quota"
-            yield {"type": "error", "message": FIXED_OVER_LIMIT, "code": "over_limit"}
+            # This count is the visitor's alone, so a refusal here is theirs. A failed check is not.
+            message = FIXED_VISITOR_LIMIT if slot is False else FIXED_OVER_LIMIT
+            yield {"type": "error", "message": message, "code": "over_limit"}
             return
         turn.outcome = "deflected"
         yield turn.delta(FIXED_DEFLECT)
@@ -2196,7 +2209,7 @@ async def _pipeline(req, turn):
     if not earlier and _has_no_subject(latest):
         # Nothing to search for and nothing to refer back to, so this spends no question.
         turn.outcome = "no_subject"
-        turn.log_allowed = await _may_log_fixed_reply(turn)
+        turn.log_allowed = bool(await _may_log_fixed_reply(turn))
         yield turn.delta(FIXED_NO_SUBJECT)
         return
 

@@ -5,7 +5,7 @@ import ChatTurn from './ChatTurn'
 
 const PLACEHOLDER = "What does your company or team work on? I'll point you to his closest work."
 const DISCLOSURE =
-  'Questions, answers and basic visit details, including IP address and approximate location, are saved so this site can improve.'
+  'Questions, answers and basic visit details, including internet protocol (IP) address and approximate location, are saved so this site can improve.'
 
 const STARTERS = [
   'How did he connect a legacy system to modern reporting?',

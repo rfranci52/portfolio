@@ -1,12 +1,14 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react'
 import { ContactError, sendContact } from '../api'
 import { SITE } from '../config'
+import { pageTitle, useDocumentTitle } from '../title'
 
 type Status = 'idle' | 'sending' | 'sent' | 'error'
 
 const EMPTY_FORM = { name: '', email: '', message: '', extra: '' }
 
 export default function Contact() {
+  useDocumentTitle(pageTitle('Contact'))
   const [form, setForm] = useState(EMPTY_FORM)
   const [status, setStatus] = useState<Status>('idle')
   const [feedback, setFeedback] = useState('')
@@ -38,7 +40,7 @@ export default function Contact() {
     <div className="max-w-xl">
       <h1 className="text-3xl font-semibold tracking-tight text-fg">Contact</h1>
       <p className="mt-3 text-muted">
-        Have a project or a question in mind? Send a note, or email{' '}
+        Questions about any of this work? Send a note, or email{' '}
         <a href={`mailto:${SITE.email}`} className="text-accent hover:underline">{SITE.email}</a>.
       </p>
 
@@ -46,9 +48,9 @@ export default function Contact() {
         <p className="mt-8 rounded-md border border-accent/40 bg-accent/5 px-4 py-3 text-fg">{feedback}</p>
       ) : (
         <form onSubmit={onSubmit} className="mt-8 space-y-4">
-          <input className={field} placeholder="Name" value={form.name} onChange={update('name')} maxLength={200} required />
-          <input className={field} type="email" placeholder="Email" value={form.email} onChange={update('email')} maxLength={320} required />
-          <textarea className={field} rows={5} placeholder="Message" value={form.message} onChange={update('message')} maxLength={5000} required />
+          <input className={field} aria-label="Name" placeholder="Name" value={form.name} onChange={update('name')} maxLength={200} required />
+          <input className={field} aria-label="Email" type="email" placeholder="Email" value={form.email} onChange={update('email')} maxLength={320} required />
+          <textarea className={field} aria-label="Message" rows={5} placeholder="Message" value={form.message} onChange={update('message')} maxLength={5000} required />
           {/* Kept out of sight and out of the tab order, so a person never fills it in. */}
           <div aria-hidden="true" className="absolute -left-[9999px] h-px w-px overflow-hidden">
             <input name="extra" tabIndex={-1} autoComplete="off" value={form.extra} onChange={update('extra')} />

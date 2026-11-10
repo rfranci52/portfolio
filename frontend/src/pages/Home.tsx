@@ -4,8 +4,10 @@ import { getProjects, type Project } from '../api'
 import { SITE } from '../config'
 import ChatPanel from '../components/ChatPanel'
 import ProjectCard from '../components/ProjectCard'
+import { HOME_TITLE, useDocumentTitle } from '../title'
 
 export default function Home() {
+  useDocumentTitle(HOME_TITLE)
   const [projects, setProjects] = useState<Project[]>([])
   useEffect(() => {
     getProjects().then(setProjects).catch(() => {})
@@ -55,7 +57,7 @@ export default function Home() {
       <section className="mt-20">
         <h2 className="font-mono text-xs uppercase tracking-widest text-muted">Selected work</h2>
         <div className="mt-6 grid gap-4">
-          {shown.map((p) => <ProjectCard key={p.slug} project={p} />)}
+          {shown.map((p) => <ProjectCard key={p.slug} project={p} heading="h3" />)}
         </div>
       </section>
     </div>

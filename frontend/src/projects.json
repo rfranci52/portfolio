@@ -18,7 +18,7 @@
       "Python",
       "pyautogui",
       "OpenCV (image matching)",
-      "Claude Vision API",
+      "Claude API (vision)",
       "PySide6 (Qt)",
       "SQLite",
       "openpyxl",
@@ -27,11 +27,11 @@
     "sections": [
       {
         "heading": "Making an invisible skill visible",
-        "body": "For years the most valuable thing I do, turning a manual click-through process into a hands-off tool, was also the least showable, because it lived inside closed systems I can't expose. This project fixes that. I built a realistic app to automate against, wrote automations that drive it start to finish, and recorded the whole thing. The result is something you can simply watch: proof of the skill, with nothing confidential in frame."
+        "body": "This project makes that skill visible. I built a realistic app to automate against, wrote automations that drive it start to finish, and recorded the whole thing. The result is something you can simply watch: proof of the skill, with nothing confidential in frame."
       },
       {
         "heading": "The app I built to automate against",
-        "body": "CaseDesk is not a mockup. It's a working PySide6 desktop application over a SQLite database: a login gate, a searchable set of accounts with five tabs of detail each, bulk export and update tools that read and write real files, and a document flow that generates actual Portable Document Format (PDF) files, all on entirely synthetic data (fake 900-series Social Security numbers (SSNs) that were never issued). I gave it deliberate friction, the details that make automation hard: a flash-message popup that appears on only some accounts, a separate document-viewer window, click-based navigation. Building a believable line-of-business application, the very kind I spend my days integrating with, is a demonstration in itself."
+        "body": "CaseDesk is not a mockup. It's a working PySide6 desktop application over a SQLite database: a login gate, a searchable set of accounts with five tabs of detail each, bulk export and update tools that read and write real files, and a document flow that generates actual Portable Document Format (PDF) files, all on entirely synthetic data, down to fake Social Security numbers from the never-issued 900 series. I gave it deliberate friction, the details that make automation hard: a flash-message popup that appears on only some accounts, a separate document-viewer window, click-based navigation. Building a believable line-of-business application, the very kind I spend my days integrating with, is a demonstration in itself."
       },
       {
         "heading": "Approach one: driving a GUI by sight",
@@ -97,10 +97,10 @@
       },
       {
         "heading": "Try it live",
-        "body": "The report builder above ran inside a confidential production system, so it can't be shown directly, so I rebuilt the idea in the open. This is a self-contained demo where you type a question in plain English about a small fictional business (a pizza shop) and watch it become Structured Query Language (SQL), run against a real database, and return live rows. It keeps the guardrails that actually mattered in production: the model is given a described schema so it can't invent a field or table, every generated query is read-only, and when a request is ambiguous it asks a clarifying question instead of guessing. Different data, same engine: the natural-language-to-query layer, lifted out and made something you can type into yourself."
+        "body": "The report builder above ran inside a confidential production system and can't be shown, so I built a separate demo from scratch on synthetic data. You type a question in plain English about a small fictional business (a pizza shop) and watch it become Structured Query Language (SQL), run against a real database, and return live rows. It keeps the guardrails that mattered in production: the model is given a described schema so it can't invent a field or table, every generated query is read-only, and when a request is ambiguous it asks a clarifying question instead of guessing. New code and new data, same discipline."
       }
     ],
-    "repo_url": null,
+    "repo_url": "https://github.com/rfranci52/nl-to-sql",
     "demo_url": "https://demo.rakimfrancis.com",
     "featured": true,
     "created_at": "2026-07-11 03:17:48.138629"
@@ -133,7 +133,7 @@
     "sections": [
       {
         "heading": "End to end, and honest about it",
-        "body": "This is a system I built for myself, start to finish, and it trades real money. Three bots with two mandates: one crypto bot harvests cycles (buy below its average cost, exit the whole position at a fixed take-profit), a second accumulates long-term positions and sells only small skims into strength, and an equities bot runs the same family of ideas on Alpaca. I'm deliberately leading with the engineering rather than any claim about returns: the interesting part isn't 'it makes money,' it's that it's built with the discipline of something that has to be trusted with real money."
+        "body": "This is a system I built for myself, start to finish, and it trades real money. Three bots with two mandates: one crypto bot harvests cycles (buy below its average cost, exit the whole position at a fixed take-profit), a second accumulates long-term positions and sells only small skims into strength, and an equities bot runs the same family of ideas on Alpaca. I'm deliberately leading with the engineering rather than any claim about returns: the interesting part isn't \"it makes money,\" it's that it's built with the discipline of something that has to be trusted with real money."
       },
       {
         "heading": "An event-sourced core, because spreadsheets make dishonest ledgers",
@@ -145,7 +145,7 @@
       },
       {
         "heading": "The strategy is a document, not a habit",
-        "body": "I build heavily with AI assistance, and the failure mode of that workflow is drift: an assistant quietly 'corrects' your strategy toward the textbook version of itself. The fix was to make the strategy a contract. Its intent lives in specification documents written in plain language; every divergence between what the code did and what I actually wanted got an explicit ruling, recorded with its reasoning; and the rebuilt bots shipped behind 35 automated tests, run against a simulated exchange, that assert the specs, including one test whose whole job is to fail loudly if anyone ever re-introduces the most persistent unwanted 'correction.' The AI tools work from that contract; the spec, and the judgment behind it, is mine."
+        "body": "I build heavily with AI assistance, and the failure mode of that workflow is drift: an assistant quietly \"corrects\" your strategy toward the textbook version of itself. The fix was to make the strategy a contract. Its intent lives in specification documents written in plain language; every divergence between what the code did and what I actually wanted got an explicit ruling, recorded with its reasoning; and the rebuilt bots shipped behind 35 automated tests, run against a simulated exchange, that assert the specs, including one test whose whole job is to fail loudly if anyone ever re-introduces the most persistent unwanted \"correction.\" The AI tools work from that contract; the spec, and the judgment behind it, is mine."
       },
       {
         "heading": "An LLM that reviews its own trades",
@@ -216,7 +216,7 @@
       },
       {
         "heading": "Results so far, as of November 9, 2026",
-        "body": "After three completed matchups the team is first of 10 and 3-0, with a 17-9-1 record in category results (6-2-1, 5-4-0, 6-3-0). It has made 21 acquisitions, the most in the league, and the next highest is 16. Last season, managing by hand, I finished 9th with 7 adds. Since going live on October 17 it has logged 58 live ESPN transactions (20 free-agent adds, 10 waiver claims, 27 roster moves and 1 future-roster move), and its decision log holds 257 entries. I'm not claiming the agent earned that record. Three weeks is a small sample, and a better draft could explain some of it. What the numbers do show is the thing I set out to fix: the daily work is getting done."
+        "body": "After three completed matchups the team is first of 10 and 3-0, with a 17-9-1 record in category results (6-2-1, 5-4-0, 6-3-0). ESPN credits it with 21 acquisitions, the most in the league, and the next highest is 16. Last season, managing by hand, I finished 9th with 7 adds. Since going live on October 17 it has logged 58 live ESPN transactions: 20 free-agent adds, 10 waiver requests (9 claims, 4 of them awarded, and 1 cancellation), 27 roster moves and 1 future-roster move. That is 24 pickups; ESPN's count of 21 leaves out the 3 made in the preseason. Its decision log holds 257 entries. I'm not claiming the agent earned that record. Three weeks is a small sample, and a better draft could explain some of it. What the numbers do show is the thing I set out to fix: the daily work is getting done."
       },
       {
         "heading": "How I built it",
@@ -265,7 +265,7 @@
         "body": "The chat on the home page answers questions from case studies I wrote. For each question, code searches them two ways, by meaning and by exact words, merges the results, and hands the best passages to Claude, which writes the answer from those passages and shows where it came from. If my case studies don't cover something, it says that instead of guessing. The How this works page walks through the full path of a question."
       }
     ],
-    "repo_url": null,
+    "repo_url": "https://github.com/rfranci52/portfolio",
     "demo_url": null,
     "featured": false,
     "created_at": "2026-07-11 03:17:48.138742"

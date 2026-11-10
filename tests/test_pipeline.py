@@ -865,7 +865,7 @@ def test_past_its_counter_a_deflected_turn_gets_the_limit_reply_and_no_row(deps,
     deps.log_slot_allowed = False
     events = deps.run("Show me the moonbase blueprints")
     assert types(events) == ["error", "done"]
-    assert events[0]["message"] == chat.FIXED_OVER_LIMIT and events[0]["code"] == "over_limit"
+    assert events[0]["message"] == chat.FIXED_VISITOR_LIMIT and events[0]["code"] == "over_limit"
     assert chat.FIXED_DEFLECT not in visible_text(events)
     assert deps.logged == []
     assert deps.log_slot_calls == ["203.0.113.9"]
@@ -878,6 +878,26 @@ def test_a_log_slot_failure_closes_the_fixed_reply_and_writes_nothing(deps, chat
     assert events[0]["message"] == chat.FIXED_OVER_LIMIT
     assert visible_text(events) == ""
     assert deps.logged == []
+
+
+def test_a_visitor_past_their_own_count_is_told_it_is_their_count(deps, chat):
+    deps.log_slot_allowed = False
+    message = deps.run("Show me the moonbase blueprints")[0]["message"]
+    assert message == chat.FIXED_VISITOR_LIMIT != chat.FIXED_OVER_LIMIT
+    assert "today's questions" in message and "\u2014" not in message
+
+
+def test_the_site_wide_ceiling_keeps_the_site_wide_message(deps, chat):
+    deps.spend_allowed = False
+    message = deps.run("What has he built?")[0]["message"]
+    assert message == chat.FIXED_OVER_LIMIT != chat.FIXED_VISITOR_LIMIT
+    assert "daily limit" in message and "\u2014" not in message
+
+
+def test_a_question_quota_refusal_keeps_the_general_message(deps, chat):
+    # The question quota answers for the visitor and the site together, so it cannot say whose count ran out.
+    deps.quota_allowed = False
+    assert deps.run("What has he built?")[0]["message"] == chat.FIXED_OVER_LIMIT
 
 
 def test_a_fixed_deflect_reply_is_not_signed(deps, chat):

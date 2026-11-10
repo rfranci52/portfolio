@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getProject, type Project } from '../api'
+import { pageTitle, useDocumentTitle } from '../title'
+import NotFound from './NotFound'
 
 export default function ProjectDetail() {
   const { slug = '' } = useParams()
@@ -8,16 +10,19 @@ export default function ProjectDetail() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    setError('') // a link from one project page to another keeps this page mounted
     getProject(slug).then(setProject).catch((e: Error) => setError(e.message))
   }, [slug])
+  useDocumentTitle(project ? pageTitle(project.title) : undefined)
 
-  if (error) return <p className="text-sm text-red-400">{error}</p>
+  // The only way to fail here is a slug that isn't one of the projects.
+  if (error) return <NotFound />
   if (!project) return <p className="font-mono text-sm text-muted">loading…</p>
 
   return (
     <article>
-      <Link to="/projects" className="font-mono text-sm text-muted hover:text-fg">← projects</Link>
-      <h1 className="mt-6 text-3xl font-semibold tracking-tight text-fg">{project.title}</h1>
+      <Link to="/projects" className="inline-block py-1 font-mono text-sm text-muted hover:text-fg">← projects</Link>
+      <h1 className="mt-5 text-3xl font-semibold tracking-tight text-fg">{project.title}</h1>
       <p className="mt-3 text-lg text-muted">{project.tagline}</p>
 
       <div className="mt-5 flex flex-wrap gap-2">
@@ -46,6 +51,7 @@ export default function ProjectDetail() {
             controls
             playsInline
             preload="metadata"
+            aria-label="Recording of the automation driving the app, with its live log beside it"
             className="w-full rounded-lg border border-border"
           />
           <figcaption className="mt-2 font-mono text-xs text-muted">

@@ -10,15 +10,16 @@ import HowThisWorks from './pages/HowThisWorks'
 import About from './pages/About'
 import Contact from './pages/Contact'
 import WhatIsSaved from './pages/WhatIsSaved'
+import NotFound from './pages/NotFound'
 
 const navLink = ({ isActive }: { isActive: boolean }) =>
-  `text-[13px] transition-colors hover:text-fg sm:text-sm ${isActive ? 'text-fg' : 'text-muted'}`
+  `py-1 text-[13px] transition-colors hover:text-fg sm:text-sm ${isActive ? 'text-fg' : 'text-muted'}`
 
 function Nav() {
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-bg/80 backdrop-blur">
-      <nav className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-6 py-4">
-        <Link to="/" className="font-mono text-sm text-fg">
+      <nav className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-6 py-3">
+        <Link to="/" className="py-1 font-mono text-sm text-fg">
           {SITE.name.toLowerCase().replace(/\s+/g, '_')}
           <span className="text-accent">.</span>
         </Link>
@@ -39,13 +40,13 @@ function Footer({ docked }: { docked: boolean }) {
         <span>© {new Date().getFullYear()} {SITE.name}</span>
         <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono">
           {SITE.linkedin && (
-            <a href={SITE.linkedin} target="_blank" rel="noreferrer" className="hover:text-fg">linkedin</a>
+            <a href={SITE.linkedin} target="_blank" rel="noreferrer" className="py-1 hover:text-fg">linkedin</a>
           )}
           {SITE.github && (
-            <a href={SITE.github} target="_blank" rel="noreferrer" className="hover:text-fg">github</a>
+            <a href={SITE.github} target="_blank" rel="noreferrer" className="py-1 hover:text-fg">github</a>
           )}
-          <Link to="/contact" className="hover:text-fg">email</Link>
-          <Link to="/what-is-saved" className="hover:text-fg">what is saved</Link>
+          <Link to="/contact" className="py-1 hover:text-fg">email</Link>
+          <Link to="/what-is-saved" className="py-1 hover:text-fg">what is saved</Link>
         </div>
       </div>
     </footer>
@@ -63,6 +64,11 @@ export default function App() {
     if (navigationType !== 'POP') window.scrollTo(0, 0)
   }, [pathname, navigationType])
 
+  // Each page names its own address as canonical, so project pages are not read as copies of home.
+  useEffect(() => {
+    document.querySelector('link[rel="canonical"]')?.setAttribute('href', `${SITE.url}${pathname}`)
+  }, [pathname])
+
   const home = pathname === '/'
 
   return (
@@ -77,6 +83,7 @@ export default function App() {
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/what-is-saved" element={<WhatIsSaved />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
       <Footer docked={!home} />

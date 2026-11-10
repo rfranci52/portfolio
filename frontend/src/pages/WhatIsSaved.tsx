@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { pageTitle, useDocumentTitle } from '../title'
 
 const GROUPS = [
   {
@@ -41,6 +42,7 @@ const GROUPS = [
 ]
 
 export default function WhatIsSaved() {
+  useDocumentTitle(pageTitle('What is saved'))
   return (
     <div className="max-w-2xl">
       <h1 className="text-3xl font-semibold tracking-tight text-fg">What is saved</h1>

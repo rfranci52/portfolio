@@ -342,7 +342,7 @@ def test_the_fixed_answers_are_not_treated_as_leaks(chat):
     assert drain(chat, [chat.FIXED_DEFLECT])[1] is None
 
 
-@pytest.mark.parametrize("name", ["FIXED_DEFLECT", "FIXED_SAFE", "FIXED_DECLINE_REPEAT", "FIXED_NO_SUBJECT"])
+@pytest.mark.parametrize("name", ["FIXED_DEFLECT", "FIXED_SAFE", "FIXED_DECLINE_REPEAT", "FIXED_NO_SUBJECT", "FIXED_VISITOR_LIMIT"])
 def test_a_fixed_sentence_the_private_rules_repeat_is_not_a_leak(chat, monkeypatch, name):
     sentence = getattr(chat, name)
     addendum = f"Any such request gets this: {sentence} Use it every time."
