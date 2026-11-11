@@ -125,6 +125,7 @@ PROJECTS = {
     "algorithmic-trading": ("Algorithmic Trading System", "/projects/algorithmic-trading"),
     "fantasy-basketball-agent": ("An AI Agent That Runs a Fantasy Basketball Team", "/projects/fantasy-basketball-agent"),
     "portfolio-site": ("This Portfolio Site", "/projects/portfolio-site"),
+    "place-finder": ("Place Finder: A 2019 Bootcamp App, Rebuilt on My Own Data", "/projects/place-finder"),
     "live-demo": ("Live Demo", "https://demo.rakimfrancis.com"),
 }
 
