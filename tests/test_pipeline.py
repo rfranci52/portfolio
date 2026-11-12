@@ -1650,6 +1650,38 @@ def test_org_keys_match_without_spaces(deps, chat):
     assert deps.logged[0]["org_matched"] == "Northwind Traders"
 
 
+def test_an_abbreviation_is_searched_under_the_listed_name(deps, chat):
+    company_turn(deps, "NWT", [org_row(chat, "nwt")])
+    assert deps.lookup_calls == [("company", "Northwind Traders")]
+    assert deps.logged[0]["org_matched"] == "Northwind Traders"
+    assert payload(deps)["extra_detail"] == "Sells specialty foods."
+
+
+def test_a_longer_name_that_contains_a_key_is_searched_as_typed(deps, chat):
+    company_turn(deps, "Northwind Traders Outlet", [org_row(chat, "northwind traders")])
+    assert deps.lookup_calls == [("company", "Northwind Traders Outlet")]
+
+
+def test_an_unlisted_company_is_searched_as_typed(deps):
+    company_turn(deps, "Contoso Freight", [])
+    assert deps.lookup_calls == [("company", "Contoso Freight")]
+
+
+def test_a_listed_name_the_lookup_check_rejects_is_not_searched(deps, chat):
+    company_turn(deps, "NWT", [org_row(chat, "nwt", name="see https://example.com")])
+    assert deps.lookup_calls == [("company", "NWT")]
+
+
+def test_org_lookup_failure_still_searches_as_typed(deps, chat, monkeypatch):
+    def broken(hashes):
+        raise RuntimeError("database is down")
+
+    monkeypatch.setattr(chat, "lookup_org_db", broken)
+    company_turn(deps, "NWT", [])
+    assert deps.lookup_calls == [("company", "NWT")]
+    assert "org_lookup_failed" in deps.logged[0]["flags"]
+
+
 def test_org_lookup_failure_still_answers(deps, chat, monkeypatch):
     def broken(hashes):
         raise RuntimeError("database is down")

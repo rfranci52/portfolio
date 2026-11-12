@@ -131,6 +131,7 @@ PROJECTS = {
 
 # Dollars per million tokens: (input, output, cache read). Cache writes are 1.25x input.
 PRICES = {
+    "claude-fable-5-2": (8.0, 40.0, 0.20),
     "claude-fable-5-1": (10.0, 50.0, 0.25),
     "claude-fable-5": (10.0, 50.0, 1.0),
     "claude-opus-5-5": (4.0, 20.0, 0.20),
@@ -1448,13 +1449,15 @@ async def run_lookup(kind, name, turn):
     payload = _empty_result()
     record = {"kind": kind, "name": name, "found": False}
     turn.lookups.append(record)
+    org = await _find_org(name, turn) if kind == "company" and _enabled("ORG_CONTEXT_ENABLED") else None
+    search_name = _search_name(org, name)
     spent = {"cost_usd": 0.0, "web_searches": 0}
     token = _lookup_spend.set(spent)
     timeout = min(LOOKUP_SECONDS, turn.deadline - time.monotonic() - MIN_CALL_SECONDS)
     try:
         if timeout <= 0:
             raise TimeoutError("no time left for a lookup")
-        result = await asyncio.wait_for(_call(web_lookup, kind, name), timeout) or {}
+        result = await asyncio.wait_for(_call(web_lookup, kind, search_name), timeout) or {}
     except Exception as exc:
         record["error"] = type(exc).__name__
         result = {}
@@ -1471,8 +1474,8 @@ async def run_lookup(kind, name, turn):
         for source in sources:
             if source not in turn.web_sources:
                 turn.web_sources.append(source)
-    if kind == "company" and _enabled("ORG_CONTEXT_ENABLED"):
-        await _merge_org_facts(name, turn, payload)
+    if org:
+        _merge_org_facts(org, turn, payload)
     return payload
 
 
@@ -1497,15 +1500,36 @@ async def _match_org(name):
     return max(rows or [], key=lambda row: sizes.get(row["key_hash"], 0), default=None)
 
 
-async def _merge_org_facts(name, turn, payload):
-    """Add what is known about an organization to a lookup result, in place."""
+async def _find_org(name, turn):
+    """The listed organization for a company name, or None. A failure only means no facts."""
     try:
-        org = await _match_org(name)
+        return await _match_org(name)
     except Exception:
         turn.flags.append("org_lookup_failed")
-        return
+        return None
+
+
+def _search_name(org, name):
+    """The name to search the web for.
+
+    When the visitor's whole name is one of a listed organization's keys, such as an
+    abbreviation, the search uses the organization's own name, so "BSE" finds the BSE
+    in the notes and not another one. A longer name that only contains a key is searched
+    as typed, because it may be a different organization.
+    """
     if not org:
-        return
+        return name
+    tokens = normalize(name).split()
+    pepper = _pepper()
+    whole = {_hash_normalized(" ".join(tokens), pepper), _hash_normalized("".join(tokens), pepper)}
+    listed = " ".join(str(org.get("display_name") or "").split())
+    if org.get("key_hash") not in whole or not listed:
+        return name
+    return listed if check_lookup({"kind": "company", "name": listed}) else name
+
+
+def _merge_org_facts(org, turn, payload):
+    """Add what is known about an organization to a lookup result, in place."""
     if turn.org is None:
         turn.org = org
     detail = (org.get("what_they_do") or "").strip()
